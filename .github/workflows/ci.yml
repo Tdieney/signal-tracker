@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned: actions/checkout@v4.2.2
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      # Pinned: actions/setup-python@v5.4.0
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: '3.10'
+
+      # Pinned: actions/setup-node@v4.2.0
+      - name: Set up Node.js
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Run Python Pipeline Tests
+        run: |
+          python -m unittest discover tests -v
+
+      - name: Build Static Dataset from CSV Fixture
+        run: |
+          python pipeline/build_dataset.py --provider csv --input tests/fixtures/sample_ohlcv.csv --output frontend/public/data
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+
+      - name: Run Frontend Tests
+        working-directory: frontend
+        run: |
+          npm test
+
+      - name: Run Frontend Typecheck
+        working-directory: frontend
+        run: |
+          npm run typecheck
+
+      - name: Build Frontend Production Bundle
+        working-directory: frontend
+        run: |
+          npm run build
+
+      - name: Run Security and Artifact Scan
+        run: |
+          python scripts/security_check.py --artifact frontend/dist

@@ -1,0 +1,167 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "2026-08-24T16:37:25Z",
+  "as_of_date": "2026-08-21",
+  "metrics": {
+    "eligible_count": 12,
+    "above_count": 6,
+    "above_pct": 50.0,
+    "below_count": 6,
+    "below_pct": 50.0,
+    "on_ma10_count": 0,
+    "cross_up_count": 2,
+    "cross_down_count": 1
+  },
+  "breadth_history": [
+    {
+      "trading_date": "2026-07-20",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-21",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-22",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-23",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-24",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-27",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-28",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-29",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-30",
+      "eligible_count": 0,
+      "above_count": 0,
+      "above_pct": null
+    },
+    {
+      "trading_date": "2026-07-31",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-03",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-04",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-05",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-06",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-07",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-10",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-11",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-12",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-13",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-14",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-17",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-18",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-19",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    },
+    {
+      "trading_date": "2026-08-20",
+      "eligible_count": 12,
+      "above_count": 5,
+      "above_pct": 41.7
+    },
+    {
+      "trading_date": "2026-08-21",
+      "eligible_count": 12,
+      "above_count": 6,
+      "above_pct": 50.0
+    }
+  ]
+}

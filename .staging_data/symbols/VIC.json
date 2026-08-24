@@ -1,0 +1,273 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "2026-08-24T16:37:25Z",
+  "symbol": "VIC",
+  "exchange": "HOSE",
+  "as_of_date": "2026-08-21",
+  "latest": {
+    "close": 41.49,
+    "ma10": 42.29,
+    "distance_pct": -1.9,
+    "signal": "BELOW_MA10",
+    "data_status": "VALID"
+  },
+  "series": [
+    {
+      "trading_date": "2026-07-20",
+      "open": 44.64,
+      "high": 45.32,
+      "low": 44.19,
+      "close": 44.87,
+      "ma10": null,
+      "volume": 1000000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-21",
+      "open": 44.51,
+      "high": 45.18,
+      "low": 44.06,
+      "close": 44.73,
+      "ma10": null,
+      "volume": 1020000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-22",
+      "open": 44.37,
+      "high": 45.05,
+      "low": 43.93,
+      "close": 44.6,
+      "ma10": null,
+      "volume": 1040000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-23",
+      "open": 44.24,
+      "high": 44.9,
+      "low": 43.8,
+      "close": 44.46,
+      "ma10": null,
+      "volume": 1060000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-24",
+      "open": 44.11,
+      "high": 44.77,
+      "low": 43.67,
+      "close": 44.33,
+      "ma10": null,
+      "volume": 1080000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-27",
+      "open": 43.98,
+      "high": 44.64,
+      "low": 43.54,
+      "close": 44.2,
+      "ma10": null,
+      "volume": 1100000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-28",
+      "open": 43.84,
+      "high": 44.5,
+      "low": 43.4,
+      "close": 44.06,
+      "ma10": null,
+      "volume": 1120000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-29",
+      "open": 43.71,
+      "high": 44.37,
+      "low": 43.27,
+      "close": 43.93,
+      "ma10": null,
+      "volume": 1140000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-30",
+      "open": 43.58,
+      "high": 44.24,
+      "low": 43.14,
+      "close": 43.8,
+      "ma10": null,
+      "volume": 1160000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-07-31",
+      "open": 43.45,
+      "high": 44.11,
+      "low": 43.02,
+      "close": 43.67,
+      "ma10": 44.27,
+      "volume": 1180000,
+      "signal": null
+    },
+    {
+      "trading_date": "2026-08-03",
+      "open": 43.32,
+      "high": 43.98,
+      "low": 42.89,
+      "close": 43.54,
+      "ma10": 44.13,
+      "volume": 1200000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-04",
+      "open": 43.19,
+      "high": 43.84,
+      "low": 42.76,
+      "close": 43.41,
+      "ma10": 44.0,
+      "volume": 1220000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-05",
+      "open": 43.06,
+      "high": 43.71,
+      "low": 42.63,
+      "close": 43.28,
+      "ma10": 43.87,
+      "volume": 1240000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-06",
+      "open": 42.93,
+      "high": 43.58,
+      "low": 42.5,
+      "close": 43.15,
+      "ma10": 43.74,
+      "volume": 1260000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-07",
+      "open": 42.8,
+      "high": 43.45,
+      "low": 42.37,
+      "close": 43.02,
+      "ma10": 43.61,
+      "volume": 1280000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-10",
+      "open": 42.67,
+      "high": 43.32,
+      "low": 42.24,
+      "close": 42.89,
+      "ma10": 43.48,
+      "volume": 1300000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-11",
+      "open": 42.55,
+      "high": 43.19,
+      "low": 42.12,
+      "close": 42.76,
+      "ma10": 43.34,
+      "volume": 1320000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-12",
+      "open": 42.42,
+      "high": 43.06,
+      "low": 42.0,
+      "close": 42.63,
+      "ma10": 43.21,
+      "volume": 1340000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-13",
+      "open": 42.29,
+      "high": 42.92,
+      "low": 41.87,
+      "close": 42.5,
+      "ma10": 43.08,
+      "volume": 1360000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-14",
+      "open": 42.16,
+      "high": 42.8,
+      "low": 41.74,
+      "close": 42.38,
+      "ma10": 42.96,
+      "volume": 1380000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-17",
+      "open": 42.04,
+      "high": 42.67,
+      "low": 41.62,
+      "close": 42.25,
+      "ma10": 42.83,
+      "volume": 1400000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-18",
+      "open": 41.91,
+      "high": 42.54,
+      "low": 41.49,
+      "close": 42.12,
+      "ma10": 42.7,
+      "volume": 1420000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-19",
+      "open": 41.79,
+      "high": 42.42,
+      "low": 41.37,
+      "close": 42.0,
+      "ma10": 42.57,
+      "volume": 1440000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-20",
+      "open": 41.7,
+      "high": 42.33,
+      "low": 41.28,
+      "close": 41.91,
+      "ma10": 42.45,
+      "volume": 1460000,
+      "signal": "BELOW_MA10"
+    },
+    {
+      "trading_date": "2026-08-21",
+      "open": 41.28,
+      "high": 41.9,
+      "low": 40.87,
+      "close": 41.49,
+      "ma10": 42.29,
+      "volume": 1480000,
+      "signal": "BELOW_MA10"
+    }
+  ],
+  "explanation": {
+    "current_close": 41.49,
+    "current_ma10": 42.29,
+    "previous_close": 41.91,
+    "previous_ma10": 42.45,
+    "rule": "BELOW_MA10"
+  }
+}
