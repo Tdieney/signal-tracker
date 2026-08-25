@@ -1274,5 +1274,76 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - `git diff --check`: 0 trailing whitespace warnings.
 - Safety & Security Impact:
   - Guaranteed preservation of original target snapshot in swap during compound rollback failures.
-  - Strict RFC-compliant origin parser rejecting all URL spoofing vectors.
 - Remaining work: Stage explicit modified files, commit and push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and verify live Pages deployment.
+
+---
+
+## 2026-08-25T21:16:00+07:00 — agy-20260825-phase3-provider-evaluation-and-decision — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Phase 3 Preparation & Implementation — Real EOD Market Data for Vietnam Stock Market:
+  1. Inspect existing provider adapters (`CsvDataProvider`, `VnstockDataProvider`, `CompanyApiDataProvider`).
+  2. Formulate Provider Decision Record covering:
+     - License & redistribution rights on public GitHub Pages;
+     - Market coverage (HOSE, HNX, UPCOM / VN30, VN100);
+     - EOD availability, reliability, and rate limits;
+     - Authentication, pricing/cost, and secret management;
+     - Fail-closed and Last-Known-Good preservation strategy.
+  3. Consult repository owner to select provider, cost tier, and secret configuration.
+  4. Implement server-side data fetching pipeline, rate-limiting, and validation without frontend secret exposure.
+  5. Add full test matrix (unit, integration, adversarial, rollback, live contract tests).
+  6. Execute release gates, commit, push, track CI/Deploy, and smoke test live Pages deployment across viewports.
+- Planned Files:
+  - `DEVELOPER_LOG.md` [MODIFY]
+  - `docs/10-provider-decision-record.md` [NEW] or `docs/04-data-contracts.md` [MODIFY]
+  - `pipeline/providers/*` [MODIFY]
+- Pre-existing working tree state: Exact commit `2069c55959da7604c0dc8c6ea84098b5545c14ed`, untracked diagnostics `error.png`, `logs_88886054015.zip`, `logs_88886054015/` preserved.
+
+---
+
+## 2026-08-25T21:48:00+07:00 — agy-20260825-phase3-provider-evaluation-and-decision — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Phase 3 Implementation — Real End-of-Day (EOD) Market Data for Vietnam Stock Market (VN30 Index):
+  1. Formulated Provider Decision Record (`docs/10-provider-decision-record.md`) evaluating Vnstock Community Quotes, Corporate APIs, and Direct Portal Adapters across licence, coverage, rate limit, pricing, and secret management.
+  2. Consulted repository owner via interactive dialog; owner selected **Option A: Vnstock (Community / Open Quotes)** for automated EOD pipeline.
+  3. Implemented lightweight, production-grade `VnstockMarketClient` in `pipeline/providers/vnstock_client.py` with rate limiting (0.05s delay), exponential backoff retries, price sanity filtering, and zero-leakage error handling.
+  4. Updated `VnstockDataProvider` in `pipeline/providers/vnstock_provider.py` with full row accounting, health check probe, live/mock client mode, and complete VN30 index support.
+  5. Updated `pipeline/models.py` with standard `VN30_SYMBOLS` (30 bluechip tickers) and universe helpers.
+  6. Updated `pipeline/build_dataset.py` and `scripts/build_all.py` to generate live VN30 dataset with automatic trading calendar session status (`CLOSED_CONFIRMED`) and freshness evaluation (`FRESH`).
+  7. Updated GitHub Actions workflows `.github/workflows/deploy-pages.yml` and `.github/workflows/ci.yml` with scheduled daily cron trigger (`30 9 * * 1-5` at 16:30 ICT Mon-Fri) and live Vnstock build step.
+  8. Created comprehensive unit, integration, and contract tests: `tests/test_vnstock_client.py` (6 tests) and `tests/test_live_dataset_pipeline.py` (integration test verifying 30 VN30 symbols, manifest, overview, screener, and symbol detail schema validity).
+  9. Updated `README.md`, `docs/10-provider-decision-record.md`, and `docs/09-operations-troubleshooting.md`.
+- Files Changed:
+  - `pipeline/providers/vnstock_client.py` [NEW]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `pipeline/providers/__init__.py` [MODIFY]
+  - `pipeline/models.py` [MODIFY]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `scripts/build_all.py` [MODIFY]
+  - `.github/workflows/ci.yml` [MODIFY]
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `frontend/public/data/*` [MODIFY/NEW/DELETE]
+  - `tests/test_vnstock_client.py` [NEW]
+  - `tests/test_live_dataset_pipeline.py` [NEW]
+  - `tests/test_provider_interface.py` [MODIFY]
+  - `docs/10-provider-decision-record.md` [NEW]
+  - `docs/09-operations-troubleshooting.md` [NEW]
+  - `README.md` [MODIFY]
+  - `DEVELOPER_LOG.md` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: 78 unit & integration tests passed (77 passed, 1 skipped for OS permission).
+  - `npm.cmd --prefix frontend test -- --run`: 38 Vitest unit tests passed across 6 test files.
+  - `npm.cmd --prefix frontend run typecheck`: 0 TypeScript errors.
+  - `npm.cmd --prefix frontend run build:pages`: Static production build succeeded.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 violations.
+  - `npm.cmd --prefix frontend audit --audit-level=high`: 0 vulnerabilities.
+  - `npm.cmd --prefix frontend run test:e2e`: 104 passed, 4 skipped across 6 browser configurations.
+  - `python scripts/build_all.py`: All 10 master gate steps passed with exit code 0.
+  - `git diff --check`: 0 trailing whitespace warnings.
+- Safety, Security & Data Provenance Impact:
+  - Verified live EOD dataset with 30 VN30 tickers (3,750 records), `quality.status="PASS"`, `freshness.status="FRESH"`, `market_session_status="CLOSED_CONFIRMED"`.
+  - Zero secrets stored in frontend or Git repository.
+  - Fully automated daily scheduled cron updates after Vietnam market close with transactional Last-Known-Good rollback safety.
+- Remaining work: Stage explicit files, commit, push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and smoke test live Pages deployment across viewports.

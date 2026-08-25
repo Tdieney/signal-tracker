@@ -6,7 +6,7 @@ import hashlib
 import logging
 import time
 from typing import Callable, Dict, List, Optional, Sequence
-from pipeline.models import OHLCVRecord
+from pipeline.models import OHLCVRecord, VN30_SYMBOLS
 from pipeline.providers.base import (
     BaseMarketDataProvider,
     ProviderFetchResult,
@@ -14,6 +14,7 @@ from pipeline.providers.base import (
     safe_date_label,
     safe_symbol_label,
 )
+from pipeline.providers.vnstock_client import VnstockMarketClient
 from pipeline.validation import validate_record
 
 logger = logging.getLogger("vn_stock_signal.vnstock_provider")
@@ -22,18 +23,29 @@ logger = logging.getLogger("vn_stock_signal.vnstock_provider")
 class VnstockDataProvider(BaseMarketDataProvider):
     """Adapter for fetching OHLCV records via vnstock / market data endpoints.
 
-    Truthful fail-closed stub in demo mode; supports configured client with true retry execution.
+    Supports dependency injection via fetch_fn for testing, or live fetching via VnstockMarketClient.
     """
 
     def __init__(
         self,
-        rate_limit_delay_seconds: float = 0.0,
-        max_retries: int = 2,
+        rate_limit_delay_seconds: float = 0.05,
+        max_retries: int = 3,
         fetch_fn: Optional[Callable[[str, str, str], List[Dict]]] = None,
+        client: Optional[VnstockMarketClient] = None,
+        is_live: bool = False,
     ):
         self.rate_limit_delay_seconds = max(0.0, rate_limit_delay_seconds)
         self.max_retries = max(1, max_retries)
         self._fetch_fn = fetch_fn
+        if client is not None:
+            self._client = client
+        elif is_live:
+            self._client = VnstockMarketClient(
+                rate_limit_delay_seconds=self.rate_limit_delay_seconds,
+                max_retries=self.max_retries,
+            )
+        else:
+            self._client = None
 
     @property
     def provider_name(self) -> str:
@@ -41,12 +53,22 @@ class VnstockDataProvider(BaseMarketDataProvider):
 
     def health_check(self) -> ProviderHealth:
         """Perform a truthful health check."""
-        if self._fetch_fn is None:
+        if self._fetch_fn is None and self._client is None:
             return ProviderHealth(
                 is_healthy=False,
                 provider_name=self.provider_name,
                 message="Vnstock adapter is an unconfigured experimental stub; no active market client configured.",
             )
+
+        if self._client is not None:
+            is_ok, msg, latency = self._client.probe()
+            return ProviderHealth(
+                is_healthy=is_ok,
+                provider_name=self.provider_name,
+                message=msg,
+                latency_ms=latency,
+            )
+
         start_time = time.time()
         try:
             # Perform a lightweight probe with safe mock parameters
@@ -77,12 +99,12 @@ class VnstockDataProvider(BaseMarketDataProvider):
         input_rows = 0
         accepted_rows = 0
         rejected_rows = 0
-        target_symbols = list(symbols or ["VN30"])
+        target_symbols = list(symbols or list(VN30_SYMBOLS))
         clean_start = safe_date_label(start_date) if start_date else ""
         clean_end = safe_date_label(end_date) if end_date else ""
         sha = hashlib.sha256()
 
-        if self._fetch_fn is None:
+        if self._fetch_fn is None and self._client is None:
             warnings.append("Vnstock live endpoint not configured; returning empty dataset.")
             return ProviderFetchResult(
                 records=[],
@@ -96,33 +118,47 @@ class VnstockDataProvider(BaseMarketDataProvider):
                 provenance="stub",
             )
 
+        symbols_with_enough_data = 0
+
         for sym in target_symbols:
             sym_label = safe_symbol_label(sym)
-            if not sym:
+            if not sym or sym_label == "[INVALID_SYMBOL]":
                 continue
 
             raw_items = None
             attempts_executed = 0
 
-            # Real retry execution loop
-            for attempt in range(1, self.max_retries + 1):
-                attempts_executed = attempt
-                if self.rate_limit_delay_seconds > 0:
-                    time.sleep(self.rate_limit_delay_seconds)
+            if self._client is not None:
                 try:
-                    raw_items = self._fetch_fn(sym_label, clean_start, clean_end)
-                    break
+                    raw_items = self._client.fetch_daily_bars(
+                        symbol=sym_label,
+                        lookback_days=180,
+                        start_date=clean_start if clean_start != "[INVALID_DATE]" else None,
+                        end_date=clean_end if clean_end != "[INVALID_DATE]" else None,
+                    )
                 except Exception:
                     raw_items = None
+            else:
+                # Real retry execution loop for custom fetch_fn
+                for attempt in range(1, self.max_retries + 1):
+                    attempts_executed = attempt
+                    if self.rate_limit_delay_seconds > 0:
+                        time.sleep(self.rate_limit_delay_seconds)
+                    try:
+                        raw_items = self._fetch_fn(sym_label, clean_start, clean_end)
+                        break
+                    except Exception:
+                        raw_items = None
 
             if raw_items is None:
-                warnings.append(f"Failed to fetch data from provider after {attempts_executed} attempt(s)")
+                warnings.append(f"Failed to fetch data from provider after {attempts_executed or self.max_retries} attempt(s)")
                 continue
 
             if not raw_items:
                 warnings.append("No records returned for requested query")
                 continue
 
+            symbol_accepted = 0
             for item in raw_items:
                 input_rows += 1
                 try:
@@ -134,7 +170,7 @@ class VnstockDataProvider(BaseMarketDataProvider):
                     vol_val = int(float(item.get("volume", 0)))
                     raw_ex = str(item.get("exchange", "HOSE")).upper()
                     ex_val = raw_ex if raw_ex in ("HOSE", "HNX", "UPCOM") else "HOSE"
-                    vn30_val = bool(item.get("in_vn30", False))
+                    vn30_val = bool(item.get("in_vn30", sym_label in VN30_SYMBOLS))
 
                     if not (open_val > 0 and high_val > 0 and low_val > 0 and close_val > 0 and vol_val >= 0):
                         rejected_rows += 1
@@ -163,9 +199,16 @@ class VnstockDataProvider(BaseMarketDataProvider):
 
                     records.append(rec)
                     accepted_rows += 1
+                    symbol_accepted += 1
                 except (KeyError, ValueError, TypeError):
                     rejected_rows += 1
                     warnings.append("Malformed price or volume record rejected")
+
+            if symbol_accepted >= 10:
+                symbols_with_enough_data += 1
+
+        is_complete = (len(target_symbols) > 0 and symbols_with_enough_data == len(target_symbols))
+        provenance = "vnstock_live" if self._client is not None else "vnstock_mock"
 
         return ProviderFetchResult(
             records=records,
@@ -175,6 +218,6 @@ class VnstockDataProvider(BaseMarketDataProvider):
             rejected_rows=rejected_rows,
             warnings=warnings,
             payload_sha256=sha.hexdigest(),
-            is_complete=False,
-            provenance="vnstock_unverified",
+            is_complete=is_complete,
+            provenance=provenance,
         )

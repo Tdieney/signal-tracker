@@ -54,9 +54,9 @@ jobs:
         run: |
           python -m unittest discover tests -v
 
-      - name: Build Static Dataset from CSV Fixture
+      - name: Build Live Dataset from Market Provider (Vnstock)
         run: |
-          python pipeline/build_dataset.py --provider csv --input tests/fixtures/sample_ohlcv.csv --output frontend/public/data --generated-at 2026-08-21T10:00:00Z
+          python pipeline/build_dataset.py --provider vnstock --universe VN30 --output frontend/public/data
 
       - name: Install Frontend Dependencies
         working-directory: frontend

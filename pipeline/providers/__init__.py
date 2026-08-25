@@ -8,6 +8,7 @@ from pipeline.providers.base import (
 )
 from pipeline.providers.company_api_provider import CompanyApiDataProvider
 from pipeline.providers.csv_provider import CsvDataProvider
+from pipeline.providers.vnstock_client import VnstockMarketClient
 from pipeline.providers.vnstock_provider import VnstockDataProvider
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "ProviderHealth",
     "CsvDataProvider",
     "VnstockDataProvider",
+    "VnstockMarketClient",
     "CompanyApiDataProvider",
 ]

@@ -20,21 +20,19 @@ def main() -> None:
     run_step(["git", "diff", "--check"], "Check for uncommitted trailing whitespace errors in working tree")
     run_step(["git", "show", "--check", "--format=", "HEAD"], "Check for committed trailing whitespace errors in HEAD")
 
-    # 1. Build dataset JSON files from CSV fixture with fixed deterministic generated-at
+    # 1. Build live dataset JSON files from Vnstock provider for VN30 universe
     run_step(
         [
             sys.executable,
             "pipeline/build_dataset.py",
             "--provider",
-            "csv",
-            "--input",
-            "tests/fixtures/sample_ohlcv.csv",
+            "vnstock",
+            "--universe",
+            "VN30",
             "--output",
             "frontend/public/data",
-            "--generated-at",
-            "2026-08-21T10:00:00Z",
         ],
-        "Build static JSON dataset from CSV fixture",
+        "Build live JSON dataset from Vnstock provider (VN30)",
     )
 
     # 2. Run Python tests

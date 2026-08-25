@@ -10,6 +10,20 @@ from typing import Any, Dict, List, Optional
 SCHEMA_VERSION = "1.0.0"
 MARKET_TIMEZONE = "Asia/Ho_Chi_Minh"
 
+VN30_SYMBOLS: tuple[str, ...] = (
+    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
+    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
+    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE",
+)
+
+
+def get_universe_symbols(universe_name: str = "VN30") -> list[str]:
+    """Return standard symbol list for the requested universe."""
+    clean_name = (universe_name or "VN30").strip().upper()
+    if clean_name in ("VN30", "ALL"):
+        return list(VN30_SYMBOLS)
+    return list(VN30_SYMBOLS)
+
 
 class SignalType(str, Enum):
     ABOVE_MA10 = "ABOVE_MA10"

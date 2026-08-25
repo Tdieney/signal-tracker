@@ -1,17 +1,17 @@
 {
   "schema_version": "1.0.0",
-  "dataset_id": "2ea695ca7b138940",
-  "as_of_date": "2026-08-21",
-  "generated_at": "2026-08-21T10:00:00Z",
+  "dataset_id": "6548acb7c119ead5",
+  "as_of_date": "2026-08-25",
+  "generated_at": "2026-08-25T14:46:03Z",
   "market_timezone": "Asia/Ho_Chi_Minh",
-  "market_session_status": "UNKNOWN",
+  "market_session_status": "CLOSED_CONFIRMED",
   "freshness": {
-    "status": "UNKNOWN",
-    "expected_as_of_date": "2026-08-21",
-    "reason": "D\u1eef li\u1ec7u m\u1eabu th\u1eed nghi\u1ec7m (fixture/demo), kh\u00f4ng ph\u1ea3i d\u1eef li\u1ec7u th\u1ecb tr\u01b0\u1eddng tr\u1ef1c ti\u1ebfp."
+    "status": "FRESH",
+    "expected_as_of_date": "2026-08-25",
+    "reason": "D\u1eef li\u1ec7u \u0111\u00e3 c\u1eadp nh\u1eadt \u0111\u1ea7y \u0111\u1ee7 cho phi\u00ean giao d\u1ecbch g\u1ea7n nh\u1ea5t (2026-08-25)"
   },
-  "provider": "csv",
-  "universe": "ALL",
+  "provider": "vnstock",
+  "universe": "VN30",
   "files": {
     "overview": "overview.json",
     "screener": "screener.json",
@@ -19,10 +19,10 @@
   },
   "quality": {
     "status": "PASS",
-    "input_rows": 300,
-    "accepted_rows": 300,
+    "input_rows": 3750,
+    "accepted_rows": 3750,
     "rejected_rows": 0,
-    "eligible_symbols": 12,
+    "eligible_symbols": 30,
     "warnings": []
   }
 }

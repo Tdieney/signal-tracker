@@ -126,10 +126,13 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     // Verify Page Title
     await expect(page.locator('h1')).toContainText('Tổng quan độ rộng thị trường');
 
-    // Verify Demo Status Banner
-    const statusBanner = page.locator('.status-banner');
-    await expect(statusBanner).toBeVisible();
-    await expect(statusBanner).toContainText('Chế độ dữ liệu mẫu');
+    // Verify Demo Status Banner or Confirmed Session status in header
+    const hasDemoBanner = (await page.locator('.status-banner').count()) > 0;
+    if (hasDemoBanner) {
+      await expect(page.locator('.status-banner')).toContainText('Chế độ dữ liệu mẫu');
+    } else {
+      await expect(page.locator('h1 + span')).toContainText('Đã xác nhận sau đóng cửa');
+    }
 
     // Verify KPI Cards (Total eligible, Above MA10, Below MA10, Cross Up MA10, Cross Down MA10)
     const metricCards = page.locator('.metric-card');

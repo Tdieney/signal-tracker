@@ -200,6 +200,31 @@ class TestProviderInterface(unittest.TestCase):
                             f"Exact token '{token}' leaked in serialized JSON artifact: {fn}",
                         )
 
+    def test_vnstock_configured_client_health_check_and_contract(self):
+        """Verify configured VnstockDataProvider with client reports healthy probe and returns valid ProviderFetchResult."""
+        from unittest.mock import MagicMock
+        from pipeline.providers.vnstock_client import VnstockMarketClient
+
+        mock_client = MagicMock(spec=VnstockMarketClient)
+        mock_client.probe.return_value = (True, "Live probe ok", 45.2)
+        mock_client.fetch_daily_bars.return_value = [
+            {"trading_date": "2026-08-25", "symbol": "FPT", "open": 71.0, "high": 72.0, "low": 70.5, "close": 71.5, "volume": 1000000, "exchange": "HOSE", "in_vn30": True}
+        ]
+
+        provider = VnstockDataProvider(client=mock_client)
+        health = provider.health_check()
+        self.assertTrue(health.is_healthy)
+        self.assertEqual(health.message, "Live probe ok")
+        self.assertEqual(health.latency_ms, 45.2)
+
+        res = provider.fetch_ohlcv(symbols=["FPT"])
+        self.assertIsInstance(res, ProviderFetchResult)
+        self.assertEqual(res.provider_name, "vnstock")
+        self.assertEqual(res.accepted_rows, 1)
+        self.assertEqual(res.rejected_rows, 0)
+        self.assertEqual(res.input_rows, 1)
+        self.assertEqual(res.provenance, "vnstock_live")
+
 
 if __name__ == "__main__":
     unittest.main()

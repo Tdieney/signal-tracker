@@ -29,6 +29,7 @@ from pipeline.models import (
     MarketSessionStatus,
     OverviewData,
     ScreenerData,
+    get_universe_symbols,
 )
 from pipeline.providers.base import ProviderFetchResult
 from pipeline.providers.company_api_provider import CompanyApiDataProvider
@@ -277,13 +278,14 @@ def main() -> None:
         provider = CsvDataProvider(args.input)
         raw_result = provider.fetch_ohlcv()
     elif args.provider.lower() == "vnstock":
-        provider = VnstockDataProvider()
-        raw_result = provider.fetch_ohlcv()
+        universe_symbols = get_universe_symbols(args.universe)
+        provider = VnstockDataProvider(is_live=True)
+        raw_result = provider.fetch_ohlcv(symbols=universe_symbols)
     else:
         provider = CompanyApiDataProvider()
         raw_result = provider.fetch_ohlcv()
 
-    print(f"Processing {len(raw_result.records)} records from {args.provider} (input_rows={raw_result.input_rows})...")
+    print(f"Processing {len(raw_result.records)} records from {args.provider} (input_rows={raw_result.input_rows}, is_complete={raw_result.is_complete})...")
 
     try:
         ds_id = build_dataset_from_records(
