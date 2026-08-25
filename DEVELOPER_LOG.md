@@ -420,6 +420,54 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
 - Safety/security/data impact:
   - Strict CSP, zero inline scripts, approved style hash, and deep recursive JSON schema validation protect against XSS and data corruption.
   - Hardened secret scanner prevents credential leaks with zero bypass vectors.
-- Remaining work: Commit, push to `origin main`, monitor GitHub Actions CI & Deploy workflows, and execute live site verification.
+
+---
+
+## 2026-08-25T13:35:00+07:00 — agy-20260825-phase1-6-truthful-ci-deployment-live-closure — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Phase 1.6 — Truthful CI & Deployment Closure and Live Verification.
+- Scope: Push commits to `origin main`, monitor GitHub Actions CI & Deploy to Pages workflows to `conclusion=success`, verify live deployment on GitHub Pages (`https://tdieney.github.io/signal-tracker/`), match live vs local manifest, and verify responsive mobile behavior live.
+- Commits Created and Pushed:
+  - `72c7a40`: `fix: add github reporter for CI annotations and refine extra small mobile layout`
+  - `b11b35d`: `fix(css): enforce overflow-wrap, flex min-width zero, and 360px layout stacking`
+  - `8d101ec`: `fix(responsive): refine <=360px layout dimensions and add diagnostic overflow assertion`
+  - `8e577d0`: `fix(ui): use compact signal labels and wrap preview rows on mobile`
+- GitHub Actions Workflow Evidence:
+  - CI Workflow (`.github/workflows/ci.yml`):
+    - Run ID: `32816596163` (`https://github.com/Tdieney/signal-tracker/actions/runs/32816596163`)
+    - Job ID: `97706031813` (`https://github.com/Tdieney/signal-tracker/actions/runs/32816596163/job/97706031813`)
+    - Status: `completed` / `conclusion: success` (All steps passed: Python tests, dataset build, frontend unit tests, typecheck, build, security scan, and Playwright 6-project E2E suite).
+  - Deploy to GitHub Pages Workflow (`.github/workflows/deploy-pages.yml`):
+    - Run ID: `32816596175` (`https://github.com/Tdieney/signal-tracker/actions/runs/32816596175`)
+    - Job 1 (`Build, Test & Validate`): `97706032213` — `completed` / `conclusion: success`
+    - Job 2 (`Deploy to Pages`): `completed` / `conclusion: success`
+- Live Deployment Verification Evidence:
+  - Live Manifest URL: `https://tdieney.github.io/signal-tracker/data/manifest.json`
+  - Live Manifest Verification Results:
+    - `dataset_id`: `"a31f530fd5738909"` (Exact 16-hex match with local fixture dataset ID).
+    - `schema_version`: `"1.0.0"`
+    - `as_of_date`: `"2026-08-21"`
+    - `market_session_status`: `"UNKNOWN"` (Demo mode safe default).
+    - `freshness.status`: `"UNKNOWN"` (Demo mode safe default).
+    - `provider`: `"csv"`
+    - `universe`: `"ALL"`
+    - `quality.status`: `"PASS"` (`input_rows: 300, accepted_rows: 300, rejected_rows: 0, eligible_symbols: 12`).
+  - Live Overview Data (`https://tdieney.github.io/signal-tracker/data/overview.json`):
+    - `eligible_count`: 12
+    - `above_count`: 6 (50.0%)
+    - `below_count`: 6 (50.0%)
+    - `cross_up_count`: 2
+    - `cross_down_count`: 1
+  - Live UI Routes Verified via Browser Subagent:
+    - Overview Route (`#/`): Status banner (`Chế độ dữ liệu mẫu`), KPI cards, Breadth chart (60 sessions), preview cards for Cross Up (2 mã) and Cross Down (1 mã).
+    - Screener Route (`#/screener`): 12 stock rows with search query, filters, and URL query param synchronization.
+    - Symbol Detail Route (`#/symbols/FPT`): FPT candlestick chart, signal explanation card, and historical OHLC table alternative.
+- Safety & Security Impact:
+  - Zero secrets exposed in frontend code, git tracking, or build artifacts.
+  - Strict Content Security Policy (`script-src 'self'`, static style hash for chart library) actively enforced in live deployment.
+  - Fail-closed runtime validation active for all JSON datasets.
+- Remaining work: None. Phase 1 is fully completed, hardened, tested across 6 browser viewports, successfully deployed to GitHub Pages, and verified live.
+
 
 
