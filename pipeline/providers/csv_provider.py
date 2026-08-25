@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import os
 from typing import List, Optional, Sequence
 from pipeline.models import OHLCVRecord
-from pipeline.providers.base import DataProvider
+from pipeline.providers.base import BaseMarketDataProvider, ProviderFetchResult, ProviderHealth
 
 
-class CsvDataProvider(DataProvider):
+class CsvDataProvider(BaseMarketDataProvider):
     """Loads OHLCV records from a local CSV file deterministically without leaking raw payloads into warnings."""
 
     def __init__(self, csv_filepath: str):
@@ -20,6 +21,26 @@ class CsvDataProvider(DataProvider):
         if not os.path.exists(csv_filepath):
             raise FileNotFoundError(f"CSV fixture file not found: {csv_filepath}")
 
+    @property
+    def provider_name(self) -> str:
+        return "csv"
+
+    def health_check(self) -> ProviderHealth:
+        """Verify that the CSV fixture file exists and is readable."""
+        if os.path.isfile(self.csv_filepath) and os.access(self.csv_filepath, os.R_OK):
+            size_kb = os.path.getsize(self.csv_filepath) / 1024.0
+            return ProviderHealth(
+                is_healthy=True,
+                provider_name=self.provider_name,
+                message=f"CSV fixture file is readable ({size_kb:.1f} KB)",
+                latency_ms=0.1,
+            )
+        return ProviderHealth(
+            is_healthy=False,
+            provider_name=self.provider_name,
+            message="CSV fixture file is missing or not readable",
+        )
+
     def fetch_ohlcv(
         self,
         symbols: Optional[Sequence[str]] = None,
@@ -27,13 +48,27 @@ class CsvDataProvider(DataProvider):
         end_date: Optional[str] = None,
     ) -> List[OHLCVRecord]:
         """Parse CSV file and return OHLCVRecord list filtered by symbols and date range."""
+        result = self.fetch_ohlcv_result(symbols=symbols, start_date=start_date, end_date=end_date)
+        return result.records
+
+    def fetch_ohlcv_result(
+        self,
+        symbols: Optional[Sequence[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> ProviderFetchResult:
+        """Parse CSV file and return full ProviderFetchResult with quality accounting."""
         records: List[OHLCVRecord] = []
         symbol_set = set(s.upper() for s in symbols) if symbols else None
         self.source_rows_count = 0
         self.rejected_rows_count = 0
         self.parse_warnings = []
+        sha = hashlib.sha256()
 
         with open(self.csv_filepath, mode="r", encoding="utf-8-sig") as f:
+            content = f.read()
+            sha.update(content.encode("utf-8"))
+            f.seek(0)
             reader = csv.DictReader(f)
             for row_idx, row in enumerate(reader, start=2):
                 if not row or not any(row.values()):
@@ -122,4 +157,13 @@ class CsvDataProvider(DataProvider):
                 )
                 records.append(rec)
 
-        return records
+        accepted_count = len(records)
+        return ProviderFetchResult(
+            records=records,
+            provider_name=self.provider_name,
+            input_rows=self.source_rows_count,
+            accepted_rows=accepted_count,
+            rejected_rows=self.rejected_rows_count,
+            warnings=list(self.parse_warnings),
+            payload_sha256=sha.hexdigest(),
+        )

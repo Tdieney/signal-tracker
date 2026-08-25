@@ -7,7 +7,7 @@
   "market_session_status": "UNKNOWN",
   "freshness": {
     "status": "UNKNOWN",
-    "expected_as_of_date": "2026-08-21",
+    "expected_as_of_date": "2026-08-24",
     "reason": "D\u1eef li\u1ec7u m\u1eabu th\u1eed nghi\u1ec7m (fixture/demo), kh\u00f4ng ph\u1ea3i d\u1eef li\u1ec7u th\u1ecb tr\u01b0\u1eddng tr\u1ef1c ti\u1ebfp."
   },
   "provider": "csv",

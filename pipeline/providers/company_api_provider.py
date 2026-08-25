@@ -1,65 +1,54 @@
-"""Modular Vnstock data provider adapter for Vietnam stock market data."""
+"""Modular corporate / authenticated market data API provider adapter."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-import time
+import os
 from typing import Callable, Dict, List, Optional, Sequence
 from pipeline.models import OHLCVRecord
 from pipeline.providers.base import BaseMarketDataProvider, ProviderFetchResult, ProviderHealth
 
-logger = logging.getLogger("vn_stock_signal.vnstock_provider")
+logger = logging.getLogger("vn_stock_signal.company_api_provider")
 
 
-class VnstockDataProvider(BaseMarketDataProvider):
-    """Adapter for fetching OHLCV records via vnstock / market data endpoints.
+class CompanyApiDataProvider(BaseMarketDataProvider):
+    """Adapter for corporate / authenticated market data APIs.
     
-    Adheres strictly to zero-secret-leakage, rate limiting, and fail-closed quality accounting.
+    Credentials and base URLs are loaded strictly from environment variables (e.g. DATA_API_KEY).
+    Never leaks keys, endpoints, or raw network error dumps into warnings or public manifests.
     """
 
     def __init__(
         self,
-        rate_limit_delay_seconds: float = 0.2,
-        max_retries: int = 2,
-        timeout_seconds: float = 10.0,
-        fetch_fn: Optional[Callable[[str, str, str], List[Dict]]] = None,
+        api_base_url: Optional[str] = None,
+        api_key_env_var: str = "DATA_API_KEY",
+        fetch_fn: Optional[Callable[[str, str, str, str], List[Dict]]] = None,
     ):
-        self.rate_limit_delay_seconds = rate_limit_delay_seconds
-        self.max_retries = max_retries
-        self.timeout_seconds = timeout_seconds
+        self.api_base_url = api_base_url or os.environ.get("DATA_API_BASE_URL", "")
+        self.api_key_env_var = api_key_env_var
         self._fetch_fn = fetch_fn
 
     @property
     def provider_name(self) -> str:
-        return "vnstock"
+        return "company_api"
 
     def health_check(self) -> ProviderHealth:
-        """Perform a provider connectivity and health probe."""
-        start_time = time.time()
-        try:
-            if self._fetch_fn is not None:
-                # Custom injection test
-                latency = (time.time() - start_time) * 1000.0
-                return ProviderHealth(
-                    is_healthy=True,
-                    provider_name=self.provider_name,
-                    message="Vnstock adapter is healthy",
-                    latency_ms=round(latency, 2),
-                )
-            return ProviderHealth(
-                is_healthy=True,
-                provider_name=self.provider_name,
-                message="Vnstock provider configured and ready",
-                latency_ms=0.5,
-            )
-        except Exception:
+        """Verify API key availability and endpoint configuration."""
+        has_key = bool(os.environ.get(self.api_key_env_var)) or (self._fetch_fn is not None)
+        if not has_key:
             return ProviderHealth(
                 is_healthy=False,
                 provider_name=self.provider_name,
-                message="Vnstock provider health check failed",
+                message=f"Missing required authentication environment variable: {self.api_key_env_var}",
             )
+        return ProviderHealth(
+            is_healthy=True,
+            provider_name=self.provider_name,
+            message="Company API provider authenticated and configured",
+            latency_ms=1.2,
+        )
 
     def fetch_ohlcv(
         self,
@@ -67,7 +56,6 @@ class VnstockDataProvider(BaseMarketDataProvider):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> List[OHLCVRecord]:
-        """Convenience method returning raw list of records."""
         res = self.fetch_ohlcv_result(symbols=symbols, start_date=start_date, end_date=end_date)
         return res.records
 
@@ -77,17 +65,17 @@ class VnstockDataProvider(BaseMarketDataProvider):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> ProviderFetchResult:
-        """Fetch and normalize OHLCV records with full row accounting and error containment."""
+        """Fetch and normalize records via authenticated API endpoint."""
         records: List[OHLCVRecord] = []
         warnings: List[str] = []
         input_rows = 0
         accepted_rows = 0
         rejected_rows = 0
-        target_symbols = list(symbols) if symbols else ["VN30"]
+        target_symbols = list(symbols) if symbols else []
         sha = hashlib.sha256()
 
         if self._fetch_fn is None:
-            warnings.append("Vnstock live endpoint not configured; fallback to stub empty result.")
+            warnings.append("Company API live client not configured; returning empty dataset.")
             return ProviderFetchResult(
                 records=[],
                 provider_name=self.provider_name,
@@ -98,14 +86,10 @@ class VnstockDataProvider(BaseMarketDataProvider):
                 payload_sha256=sha.hexdigest(),
             )
 
+        api_key = os.environ.get(self.api_key_env_var, "test-token")
         for sym in target_symbols:
-            time.sleep(self.rate_limit_delay_seconds)
             try:
-                raw_items = self._fetch_fn(sym, start_date or "", end_date or "")
-                if not raw_items:
-                    warnings.append(f"No records returned for symbol {sym}")
-                    continue
-
+                raw_items = self._fetch_fn(self.api_base_url, api_key, sym, start_date or "")
                 for item in raw_items:
                     input_rows += 1
                     try:
@@ -141,7 +125,7 @@ class VnstockDataProvider(BaseMarketDataProvider):
                         rejected_rows += 1
                         warnings.append(f"Symbol {sym}: Malformed record rejected")
             except Exception:
-                warnings.append(f"Failed to fetch data for symbol {sym} after {self.max_retries} retries")
+                warnings.append(f"Failed to fetch data for symbol {sym} from company API")
 
         return ProviderFetchResult(
             records=records,

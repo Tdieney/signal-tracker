@@ -8,10 +8,12 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+from typing import Optional, Sequence
 
 # Ensure repo root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from pipeline.freshness import evaluate_dataset_freshness, evaluate_market_session_status
 from pipeline.indicators import calculate_all_indicators
 from pipeline.models import (
     MARKET_TIMEZONE,
@@ -23,7 +25,9 @@ from pipeline.models import (
     OverviewData,
     ScreenerData,
 )
+from pipeline.providers.company_api_provider import CompanyApiDataProvider
 from pipeline.providers.csv_provider import CsvDataProvider
+from pipeline.providers.vnstock_provider import VnstockDataProvider
 from pipeline.serialization import (
     build_screener_item,
     build_symbol_detail,
@@ -42,10 +46,7 @@ def compute_deterministic_dataset_id(
     eligible_count: int = 0,
     quality_metadata: dict | None = None,
 ) -> str:
-    """Derive deterministic 16-hex dataset ID hash from canonical sorted representation of all pipeline inputs & public metrics.
-
-    Excludes volatile `generated_at` build timestamp so identical data inputs yield identical dataset_id.
-    """
+    """Derive deterministic 16-hex dataset ID hash from canonical sorted representation of all pipeline inputs & public metrics."""
     canonical_data = {
         "as_of_date": as_of_date,
         "provider": provider,
@@ -86,6 +87,7 @@ def build_dataset_from_records(
     fixed_generated_at: str | None = None,
     workspace_root: str | None = None,
     source_rows_count: int | None = None,
+    is_live_provider: bool = False,
 ) -> str:
     """Build and serialize full dataset from normalized OHLCV records."""
     # 1. Normalize and validate with strict accounting
@@ -116,7 +118,8 @@ def build_dataset_from_records(
     quality_info.eligible_symbols = as_of_metric.eligible_count
 
     # 6. Build Overview & Screener Data with canonical hash
-    generated_at_str = fixed_generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_dt = datetime.now(timezone.utc)
+    generated_at_str = fixed_generated_at or now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     dataset_id = compute_deterministic_dataset_id(
         as_of_date=target_as_of,
         records=accepted_records,
@@ -158,15 +161,9 @@ def build_dataset_from_records(
         for sym in all_symbols
     }
 
-    # 8. Build Manifest with Truthful Semantics (safe default is UNKNOWN)
-    is_csv_fixture = (provider_name.lower() == "csv")
-    session_status = MarketSessionStatus.UNKNOWN.value
-    freshness_status = FreshnessStatus.UNKNOWN
-    freshness_reason = (
-        "Dữ liệu mẫu thử nghiệm (fixture/demo), không phải dữ liệu thị trường trực tiếp."
-        if is_csv_fixture
-        else "Offline dataset"
-    )
+    # 8. Build Manifest with Truthful Semantics & Session Status
+    session_status = evaluate_market_session_status(now_dt, target_as_of, is_live_provider=is_live_provider)
+    freshness_info = evaluate_dataset_freshness(now_dt, target_as_of, is_live_provider=is_live_provider)
 
     manifest_data = ManifestData(
         schema_version=SCHEMA_VERSION,
@@ -175,11 +172,7 @@ def build_dataset_from_records(
         generated_at=generated_at_str,
         market_timezone=MARKET_TIMEZONE,
         market_session_status=session_status,
-        freshness=FreshnessInfo(
-            status=freshness_status,
-            expected_as_of_date=target_as_of,
-            reason=freshness_reason,
-        ),
+        freshness=freshness_info,
         provider=provider_name,
         universe=universe_name,
         files={
@@ -206,8 +199,8 @@ def build_dataset_from_records(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="VN Stock Signal Data Pipeline")
-    parser.add_argument("--provider", default="csv", choices=["csv", "vnstock"], help="Data provider")
-    parser.add_argument("--input", default="tests/fixtures/sample_ohlcv.csv", help="Input CSV file path")
+    parser.add_argument("--provider", default="csv", choices=["csv", "vnstock", "company_api"], help="Data provider")
+    parser.add_argument("--input", default="tests/fixtures/sample_ohlcv.csv", help="Input CSV file path (for csv provider)")
     parser.add_argument("--output", default="frontend/public/data", help="Output directory for JSON")
     parser.add_argument("--staging", default=None, help="Optional staging temporary directory")
     parser.add_argument("--as-of", default=None, help="Target as-of date (YYYY-MM-DD)")
@@ -216,29 +209,31 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.provider.lower() != "csv":
-        print(
-            f"ERROR: Provider '{args.provider}' is experimental and unsupported for production in Phase 1. Use --provider csv.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    if args.provider.lower() == "csv":
+        provider = CsvDataProvider(args.input)
+        raw_result = provider.fetch_ohlcv_result()
+    elif args.provider.lower() == "vnstock":
+        provider = VnstockDataProvider()
+        raw_result = provider.fetch_ohlcv_result()
+    else:
+        provider = CompanyApiDataProvider()
+        raw_result = provider.fetch_ohlcv_result()
 
-    provider = CsvDataProvider(args.input)
-    raw_records = provider.fetch_ohlcv()
-    print(f"Processing {len(raw_records)} records from {args.provider}...")
+    print(f"Processing {len(raw_result.records)} records from {args.provider} (input_rows={raw_result.input_rows})...")
 
     try:
         ds_id = build_dataset_from_records(
-            records=raw_records,
+            records=raw_result.records,
             output_dir=args.output,
             staging_dir=args.staging,
             as_of_date=args.as_of,
             provider_name=args.provider,
             universe_name=args.universe,
-            parse_errors_count=provider.rejected_rows_count,
-            parse_warnings=provider.parse_warnings,
+            parse_errors_count=raw_result.rejected_rows,
+            parse_warnings=raw_result.warnings,
             fixed_generated_at=args.generated_at,
-            source_rows_count=provider.source_rows_count,
+            source_rows_count=raw_result.input_rows,
+            is_live_provider=(args.provider.lower() != "csv"),
         )
         print(f"Successfully generated dataset {ds_id} into {args.output}")
     except Exception as ex:

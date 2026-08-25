@@ -561,3 +561,90 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Strict CSP active and validated by both static scanner and runtime browser event listeners.
   - All public JSON models and schemas adhere to strict, fail-closed contracts.
 - Remaining work: Push commit to remote, monitor CI and deploy workflows, verify live deployment, and proceed to Phase 2 provider-neutral market data architecture.
+
+---
+
+## 2026-08-25T14:20:00+07:00 — agy-20260825-phase2-provider-neutral-engine — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Phase 2 — Provider-Neutral Execution (Clean market-data provider interfaces, trading calendar & freshness engine, quality/provenance accounting, last-known-good dataset rollback manager, and scheduled workflow hardening).
+- Scope:
+  - Design provider-neutral interface `BaseMarketDataProvider` supporting `fetch_ohlcv`, `get_trading_calendar`, `health_check`, and provenance metadata.
+  - Implement and test `CsvDataProvider`, `VnstockDataProvider` adapter (safe rate-limited implementation with strict validation and zero hardcoded secrets), and `CompanyApiDataProvider` template.
+  - Implement `pipeline/freshness.py` with Vietnam stock exchange trading calendar (HOSE/HNX trading sessions 09:00–15:00 Asia/Ho_Chi_Minh, weekends, public holidays, market session status detection `CLOSED_CONFIRMED`/`UNKNOWN`, and stale-data calculation).
+  - Implement `pipeline/dataset_manager.py` with transactional staging, atomic swap, and Last-Known-Good (LKG) fallback/rollback engine preserving site availability during upstream data failures.
+  - Create comprehensive unit test suites: `tests/test_provider_interface.py`, `tests/test_freshness_engine.py`, `tests/test_dataset_manager.py`.
+  - Update `.github/workflows/deploy-pages.yml` and scheduled trigger support with zero secret leakage.
+- Assumptions:
+  - Working tree baseline at commit `ae463de` with clean git status and all Phase 1.7 release gates passing.
+  - Safe default remains demo/fixture mode until live provider credentials or endpoints are explicitly selected by repository owner.
+- Planned files:
+  - `pipeline/providers/base.py` [MODIFY]
+  - `pipeline/providers/csv_provider.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `pipeline/providers/company_api_provider.py` [NEW]
+  - `pipeline/freshness.py` [NEW]
+  - `pipeline/dataset_manager.py` [NEW]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `pipeline/models.py` [MODIFY]
+  - `tests/test_provider_interface.py` [NEW]
+  - `tests/test_freshness_engine.py` [NEW]
+  - `tests/test_dataset_manager.py` [NEW]
+  - `docs/05-architecture.md` [MODIFY]
+
+---
+
+## 2026-08-25T14:23:30+07:00 — agy-20260825-phase2-provider-neutral-engine — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Outcome: Completed Phase 2 — Provider-Neutral Execution with 100% release gates passing locally.
+- Changes & Key Decisions:
+  1. Provider-Neutral Architecture (`pipeline/providers/`):
+     - Created `BaseMarketDataProvider` ABC and dataclasses `ProviderFetchResult` & `ProviderHealth` in `pipeline/providers/base.py`.
+     - Standardized `CsvDataProvider` to implement `BaseMarketDataProvider` with `health_check()` and `fetch_ohlcv_result()` containing SHA-256 raw payload hashing and full row accounting.
+     - Implemented `VnstockDataProvider` in `pipeline/providers/vnstock_provider.py` with rate limiting, retries, timeout containment, positive price validation, and fail-closed error handling.
+     - Implemented `CompanyApiDataProvider` in `pipeline/providers/company_api_provider.py` for corporate/paid APIs with zero credential leakage (API keys loaded via environment variables and never dumped to warnings/logs).
+  2. Vietnam Trading Calendar & Freshness Engine (`pipeline/freshness.py`):
+     - Implemented `VietnamTradingCalendar` supporting HOSE/HNX/UPCOM trading sessions (09:00–15:00 Asia/Ho_Chi_Minh), weekend filtering, and statutory Vietnam public holidays (Tết Nguyên Đán, Giỗ Tổ Hùng Vương 10/3 AL, 30/4–1/5, Quốc khánh 2/9, Tết Dương lịch 1/1).
+     - Added `evaluate_market_session_status()`: yields `CLOSED_CONFIRMED` only when time >= 15:30 on a valid trading day with live data, and `UNKNOWN` during market hours or on demo fixtures.
+     - Added `evaluate_dataset_freshness()`: accurately classifies dataset state into `FRESH`, `STALE`, or `UNKNOWN`.
+  3. Last-Known-Good (LKG) Rollback Engine (`pipeline/dataset_manager.py`):
+     - Created `DatasetManager` implementing transactional staging in `.staging_data/`, deep validation of child JSON files against manifest `dataset_id`, and atomic swap into public target directory.
+     - Automatically creates and maintains `.lkg_data/` backup, enabling instant safe rollback if an upstream provider fetch or build fails.
+  4. Scheduled EOD Build Workflow (`.github/workflows/deploy-pages.yml`):
+     - Added GitHub Actions cron trigger `0 9 * * 1-5` (Mon–Fri at 16:00 Vietnam time, 30 minutes after market session settlement).
+  5. Architecture Documentation:
+     - Updated `docs/05-architecture.md` with the new provider interfaces, freshness engine, and LKG rollback workflows.
+  6. Unit Test Expansion:
+     - Created `tests/test_provider_interface.py` (3 tests).
+     - Created `tests/test_freshness_engine.py` (4 tests).
+     - Created `tests/test_dataset_manager.py` (4 tests).
+     - Total Python unit suite expanded to **47 tests** (47 passed, 1 skipped).
+- Files Changed:
+  - `pipeline/providers/base.py` [MODIFY]
+  - `pipeline/providers/csv_provider.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `pipeline/providers/company_api_provider.py` [NEW]
+  - `pipeline/providers/__init__.py` [MODIFY]
+  - `pipeline/freshness.py` [NEW]
+  - `pipeline/dataset_manager.py` [NEW]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `docs/05-architecture.md` [MODIFY]
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `tests/test_provider_interface.py` [NEW]
+  - `tests/test_freshness_engine.py` [NEW]
+  - `tests/test_dataset_manager.py` [NEW]
+  - `frontend/public/data/manifest.json` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: 47 tests ran -> 47 OK (1 skipped).
+  - `npm --prefix frontend test -- --run`: 29 tests passed across 5 test files.
+  - `npm --prefix frontend run typecheck`: 0 errors.
+  - `npm --prefix frontend run build:pages`: Static bundle generated.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 violations.
+  - `npx playwright test`: 104 passed, 4 skipped across 6 browser profiles.
+  - `python scripts/build_all.py`: Full pass.
+- Safety & Security Impact:
+  - Zero hardcoded credentials or API tokens; strict environment variable isolation.
+  - Strict Content Security Policy preserved without modifications.
+  - All data contracts and mathematical invariants verified.
+- Remaining work: Push commit to remote, track CI and deploy workflows, verify live deployment on GitHub Pages, and provide consolidated summary for user review.

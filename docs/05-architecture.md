@@ -4,11 +4,13 @@
 
 ```mermaid
 flowchart LR
-  P[CSV / Vnstock provider] --> V[Validate + normalize]
-  V --> I[Indicators + signals]
-  I --> J[Versioned public JSON]
-  J --> F[React static app]
-  F --> G[GitHub Pages]
+  P[Market Data Provider\nCSV / Vnstock / Company API] --> V[Validate + Normalize\nRow Accounting]
+  V --> I[Indicators + Signals\nPure Functions]
+  I --> S[Staging Directory\n.staging_data]
+  S --> D[Dataset Manager\nDeep Verify & LKG Backup]
+  D --> J[Versioned Public JSON\nfrontend/public/data]
+  J --> F[React Static App\nStrict Zod Schemas]
+  F --> G[GitHub Pages\nStrict CSP Meta]
 ```
 
 GitHub Actions chạy pipeline và build; browser chỉ tải static assets/JSON. Không có secret, Python hay provider call trong browser.
@@ -18,183 +20,123 @@ GitHub Actions chạy pipeline và build; browser chỉ tải static assets/JSON
 ```text
 .
 ├── docs/
+│   ├── 01-overview-and-scope.md
+│   ├── 02-methodology-and-indicators.md
+│   ├── 03-system-rules-and-safety.md
+│   ├── 04-data-contracts.md
+│   ├── 05-architecture.md
+│   └── AI_AUTONOMOUS_WORKFLOW.md
 ├── frontend/
 │   ├── public/data/
 │   ├── src/
 │   │   ├── app/              # router, providers, app shell
-│   │   ├── components/       # component dùng chung
+│   │   ├── components/       # reusable UI components
 │   │   ├── features/
 │   │   │   ├── overview/
 │   │   │   ├── screener/
 │   │   │   └── symbol-detail/
 │   │   ├── lib/              # fetch, format, URL/filter helpers
-│   │   ├── schemas/          # runtime JSON validation
+│   │   ├── schemas/          # strict runtime Zod validation
 │   │   ├── styles/           # tokens + global CSS
 │   │   └── test/
 │   ├── package.json
 │   └── vite.config.ts
 ├── pipeline/
 │   ├── providers/
-│   ├── models.py
-│   ├── validation.py
-│   ├── indicators.py
-│   ├── signals.py
-│   ├── serialization.py
-│   └── build_dataset.py
+│   │   ├── base.py           # BaseMarketDataProvider ABC & Result types
+│   │   ├── csv_provider.py   # Deterministic CSV fixture provider
+│   │   ├── vnstock_provider.py # Vnstock rate-limited adapter
+│   │   └── company_api_provider.py # Authenticated API adapter
+│   ├── dataset_manager.py    # Staging & Last-Known-Good rollback manager
+│   ├── freshness.py          # VN trading calendar & session status engine
+│   ├── models.py             # Strongly-typed dataclasses & enums
+│   ├── validation.py         # Row accounting & normalization
+│   ├── indicators.py         # MA10 & Volume calculation
+│   ├── signals.py            # Signal classification & market breadth
+│   ├── serialization.py      # Atomically write & deep check JSON
+│   └── build_dataset.py      # Master pipeline entrypoint
 ├── tests/
 │   ├── fixtures/
-│   ├── test_validation.py
+│   ├── test_csv_provider.py
+│   ├── test_dataset_manager.py
+│   ├── test_freshness_engine.py
 │   ├── test_indicators.py
+│   ├── test_provider_interface.py
+│   ├── test_security_check.py
+│   ├── test_serialization.py
 │   ├── test_signals.py
-│   └── test_serialization.py
+│   └── test_validation.py
 ├── scripts/
+│   ├── build_all.py
+│   └── security_check.py
 ├── .github/workflows/
 │   ├── ci.yml
 │   └── deploy-pages.yml
 ├── .env.example
 ├── .gitignore
+├── AGENTS.md
+├── DEVELOPER_LOG.md
 └── README.md
 ```
-
-AI có thể đề xuất điều chỉnh nhỏ nhưng không được gom pipeline vào frontend hoặc tạo backend ngoài scope.
 
 ## 3. Frontend boundaries
 
 ### Data layer
 
 - `fetchJson(path, signal)` chịu trách nhiệm timeout/abort, HTTP check và parse.
-- Runtime schema validation ở boundary trước khi data vào app state.
+- Strict runtime Zod schema validation ở boundary trước khi data vào app state.
 - Manifest tải trước; các page data tải theo route.
 - Request detail được abort khi user đổi symbol/unmount.
-- Không retry vô hạn; tối đa một retry tự động cho lỗi mạng tạm thời, sau đó cho người dùng Retry.
+- Không retry vô hạn; tối đa một retry tự động cho lỗi mạng tạm thời, sau đó cho người dùng nút Retry.
 
 ### State
 
-- Server/static data: query/cache layer nhỏ hoặc custom hooks; không cần global state library nếu React primitives đủ.
-- Filter/sort/page: URL là source of truth.
-- Preference không nhạy cảm: `localStorage` với key có version.
-- Derived result dùng pure selector dùng chung cho table/card; không lưu bản sao dễ lệch.
+- Server/static data: custom hooks và in-memory cache; không cần global state library cồng kềnh.
+- Filter/sort/page: URL query hash là single source of truth.
+- Responsive views: Desktop Table và Mobile Cards render cùng canonical data source.
 
 ### Routing và GitHub Pages
 
 - Dùng hash routing: `/#/screener` và `/#/symbols/FPT`.
 - Mọi asset/data path dùng `import.meta.env.BASE_URL` để chạy được ở project subpath.
 - `vite.config.ts` nhận base từ cấu hình deploy công khai, không phải secret.
-- Không phụ thuộc rewrite server.
 
-### Performance
+## 4. Pipeline boundaries & Provider Architecture
 
-- Lazy-load route detail/chart nếu bundle benefit rõ.
-- Không import toàn bộ icon library.
-- Chỉ tải detail JSON khi mở mã.
-- Screener vài nghìn row: paginate hoặc virtualize nếu đo thấy cần; ưu tiên semantic/accessibility trước.
-- Chart resize theo container, không attach listener trùng.
-
-## 4. Pipeline boundaries
-
-### Provider interface
+### Provider Interface (`pipeline/providers/base.py`)
 
 ```python
-class DataProvider(Protocol):
-    def fetch_ohlcv(
-        self,
-        symbols: Sequence[str],
-        start: date,
-        end: date,
-    ) -> DataFrame: ...
+class BaseMarketDataProvider(ABC):
+    @property
+    @abstractmethod
+    def provider_name(self) -> str: ...
+
+    @abstractmethod
+    def fetch_ohlcv(self, symbols=None, start_date=None, end_date=None) -> ProviderFetchResult: ...
+
+    @abstractmethod
+    def health_check(self) -> ProviderHealth: ...
 ```
 
-- Provider chỉ fetch/map field; không tính signal.
-- Validation/normalization không biết vendor.
-- Indicator và signal là pure/deterministic functions khi có thể.
-- Serialization chỉ nhận model đã validate.
+- Provider chỉ fetch/map field và hạch toán số dòng (`input_rows`, `accepted_rows`, `rejected_rows`); không tự tính indicator hay signal.
+- Validation/normalization không phụ thuộc vendor cụ thể.
+- Indicator và signal là pure/deterministic functions.
 
-### Build flow
+### Freshness, Trading Calendar & Session Status (`pipeline/freshness.py`)
 
-1. Parse cấu hình qua allow-list và validate.
-2. Fetch vào vùng tạm.
-3. Normalize + validate.
-4. Tính indicator/signal/breadth.
-5. Serialize vào staging directory.
-6. Validate schema, cross-file consistency và public-data allow-list.
-7. Atomic publish/copy sang `frontend/public/data`.
-8. Build frontend.
+- `VietnamTradingCalendar`: kiểm tra ngày giao dịch thực tế trên thị trường chứng khoán Việt Nam (HOSE/HNX/UPCOM), loại trừ thứ Bảy, Chủ Nhật và các ngày nghỉ lễ theo quy định (Tết Nguyên Đán, Giỗ Tổ Hùng Vương 10/3 AL, 30/4–1/5, Quốc khánh 2/9, Tết Dương lịch 1/1).
+- `evaluate_market_session_status`: Xác định trạng thái phiên giao dịch (`CLOSED_CONFIRMED` khi sau 15:30 của ngày giao dịch chuẩn có dữ liệu xác thực, `UNKNOWN` trong phiên hoặc ở chế độ dữ liệu mẫu demo).
+- `evaluate_dataset_freshness`: Đánh giá `FRESH`, `STALE` hoặc `UNKNOWN`.
 
-Pipeline phải exit non-zero khi schema, secret scan hoặc invariant nghiêm trọng thất bại. Không deploy dataset lỗi chỉ để workflow xanh.
+### Staging & Last-Known-Good Rollback Engine (`pipeline/dataset_manager.py`)
 
-## 5. Configuration
+1. Build dataset vào thư mục staging tạm (`.staging_data`).
+2. Deep validate schema, cross-file consistency và dataset_id.
+3. Nếu hợp lệ: Atomic swap sang thư mục đích (`frontend/public/data`) và cập nhật bản sao Last-Known-Good (`.lkg_data`).
+4. Nếu upstream fetch hoặc build thất bại: Tự động phục hồi từ bản sao Last-Known-Good gần nhất để đảm bảo GitHub Pages luôn có dữ liệu an toàn phục vụ người dùng.
 
-### Public configuration
+## 5. Security & Configuration
 
-Có thể nằm trong repo:
-
-- app title;
-- GitHub Pages base path;
-- provider name cho demo;
-- universe public;
-- freshness/display thresholds không nhạy cảm.
-
-### Secret configuration
-
-Chỉ ở GitHub Actions Secrets hoặc local environment không commit:
-
-- API token/key;
-- private endpoint credential;
-- account/customer identifier;
-- dữ liệu cấp phép không được public.
-
-Không đặt secret dưới prefix `VITE_`. Theo tài liệu Vite, biến `VITE_*` được bundle và lộ cho client: [Vite Env Variables and Modes](https://vite.dev/guide/env-and-mode).
-
-## 6. GitHub Actions
-
-### CI workflow
-
-- Trigger trên pull request và push.
-- Mặc định `permissions: contents: read`.
-- Không cung cấp data-provider secret cho workflow chạy code từ pull request không tin cậy.
-- Chạy Python lint/type/test, frontend lint/type/test, schema validation, secret scan và production build.
-
-### Deploy workflow
-
-- Trigger manual và schedule sau giờ đóng cửa; schedule delay là tình huống bình thường.
-- Có concurrency group để không deploy hai dataset chồng nhau.
-- Job fetch chỉ nhận đúng secret cần thiết; secret không truyền sang frontend build nếu không cần.
-- Job deploy có quyền tối thiểu theo GitHub Pages (`pages: write`, `id-token: write`, `contents: read`) và environment protection nếu repo hỗ trợ.
-- Third-party actions pin full commit SHA; Dependabot/Renovate có thể mở PR cập nhật SHA.
-- Upload đúng build artifact, không upload workspace, cache, `.git` hay raw input.
-
-Tham chiếu: [GitHub Actions secure use](https://docs.github.com/en/actions/reference/security/secure-use) và [GitHub Pages HTTPS](https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https).
-
-## 7. Dependency policy
-
-- Commit lockfile của Python và npm theo công cụ đã chọn.
-- CI dùng install deterministic (`npm ci` và equivalent Python lock install).
-- Không thêm dependency cho helper nhỏ có thể viết/test rõ ràng.
-- Dependency mới phải có: lý do, license phù hợp, maintenance status và security review cơ bản.
-- Không load production JS từ CDN; bundle/self-host để lock version và giảm third-party risk.
-- Bật dependency/security update của GitHub nếu có thể.
-
-## 8. Observability không xâm phạm riêng tư
-
-Phase 1 không cần analytics. Chất lượng build thể hiện qua:
-
-- Actions summary: dataset id, counts, rejected rows, duration, artifact hash;
-- log có cấu trúc, không chứa raw secret/credential;
-- UI hiện `dataset_id`, app version, schema version và data-quality summary;
-- lỗi client chỉ hiện local; không tự gửi sang dịch vụ bên thứ ba.
-
-## 9. Local development contract
-
-Repo cần cung cấp command ổn định (tên chính xác có thể được scaffold ở milestone 0):
-
-```text
-pipeline test
-pipeline build --provider csv
-frontend install
-frontend dev
-frontend test
-frontend build
-all checks
-```
-
-`CsvDataProvider` và fixture phải đủ để build/test offline, không bắt developer có secret chỉ để chạy website.
+- Tuyệt đối không đặt secret hoặc API token vào frontend code hoặc `VITE_*` environment variables.
+- Tất cả secret (nếu có) được truyền qua GitHub Actions Secrets và chỉ truy cập trong backend pipeline step.
+- Content Security Policy (CSP) nghiêm ngặt với `default-src 'none'`, `script-src 'self'`, `style-src 'self' '<sha256>'`, `connect-src 'self'`, `img-src 'self' data:`.
