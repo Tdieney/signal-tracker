@@ -1,5 +1,6 @@
 /**
  * Pure, modular, and unit-tested predicate functions for Playwright E2E and console error filtering.
+ * All predicates use exact equality or strictly anchored regex patterns (^ and $), and validate trusted origins.
  */
 
 export interface PageListenerFilter {
@@ -8,12 +9,23 @@ export interface PageListenerFilter {
   isAllowedRequestFailed?: (url: string, errorText?: string) => boolean;
 }
 
+const isTrustedOrigin = (url?: string): boolean => {
+  if (!url) return true;
+  if (/^https?:\/\/(?!localhost|127\.0\.0\.1|tdieney\.github\.io)/i.test(url)) {
+    return false;
+  }
+  return true;
+};
+
 /**
  * Exact predicate for network request failure on a specific resource URL suffix.
  */
 export const createExactRequestFailedPredicate = (expectedUrlSuffix: string) => {
   return (url: string, _errorText?: string): boolean => {
-    return url.endsWith(expectedUrlSuffix);
+    if (!url.endsWith(expectedUrlSuffix)) {
+      return false;
+    }
+    return isTrustedOrigin(url);
   };
 };
 
@@ -32,10 +44,10 @@ export const isStandardBrowser404Console = (
     return false;
   }
   if (resourceSuffix) {
-    if (!locationUrl) {
+    if (!locationUrl || !locationUrl.endsWith(resourceSuffix)) {
       return false;
     }
-    return locationUrl.endsWith(resourceSuffix);
+    return isTrustedOrigin(locationUrl);
   }
   return true;
 };
@@ -49,89 +61,67 @@ export const isManifest404AllowedConsole = (text: string, locationUrl?: string):
 
 /**
  * Predicate for invalid symbol route 404 scenario.
+ * Strictly requires standard browser 404 on the exact symbol endpoint.
  */
 export const createInvalidSymbolAllowedConsole = (symbol: string) => {
   const expectedSuffix = `/data/symbols/${symbol}.json`;
   return (text: string, locationUrl?: string): boolean => {
-    if (isStandardBrowser404Console(text, locationUrl, expectedSuffix)) {
-      return true;
-    }
-    const isAnchoredAppMsg =
-      text === `Không tìm thấy dữ liệu cho mã ${symbol}` ||
-      text.startsWith(`Không thể tải dữ liệu chi tiết mã ${symbol}:`);
-    if (!isAnchoredAppMsg) {
-      return false;
-    }
-    if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith(expectedSuffix)) {
-      return false;
-    }
-    return true;
+    return isStandardBrowser404Console(text, locationUrl, expectedSuffix);
   };
 };
 
 /**
  * Predicate for malformed manifest JSON syntax error.
+ * Strictly matches standard engine JSON syntax errors, anchored from ^ to $.
  */
 export const isMalformedManifestAllowedConsole = (text: string, locationUrl?: string): boolean => {
   const isExactSyntaxError =
-    /^SyntaxError: (JSON\.parse: unexpected character|Unexpected token ['"<]|Unexpected identifier|JSON Parse error|Unexpected end of JSON input)/.test(text.trim()) ||
-    text.startsWith("Lỗi kết nối khi tải manifest.json:");
+    /^SyntaxError: (JSON\.parse: unexpected character at line \d+ column \d+ of the JSON data|Unexpected token ['"<][^]*is not valid JSON|Unexpected token [A-Za-z0-9_<]+ in JSON at position \d+|JSON Parse error: Unexpected identifier "[^"]*"|Unexpected end of JSON input)$/.test(
+      text.trim()
+    );
   if (!isExactSyntaxError) {
     return false;
   }
-  if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith("/data/manifest.json")) {
-    return false;
-  }
-  return true;
+  return isTrustedOrigin(locationUrl);
 };
 
 /**
  * Predicate for unsupported manifest schema version.
+ * Strictly matches exact application schema validation console format.
  */
 export const isUnsupportedSchemaAllowedConsole = (text: string, locationUrl?: string): boolean => {
-  const isAnchoredSchema =
-    text.startsWith("Schema validation failed for manifest.json:") ||
-    text.startsWith("Schema validation failed for /data/manifest.json:") ||
-    text === "Phiên bản dữ liệu không tương thích";
-  if (!isAnchoredSchema) {
+  const isExactSchema = /^Schema validation failed for manifest\.json: (\{.*\}|JSHandle@object)$/.test(text.trim());
+  if (!isExactSchema) {
     return false;
   }
-  if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith("/data/manifest.json")) {
-    return false;
-  }
-  return true;
+  return isTrustedOrigin(locationUrl);
 };
 
 /**
  * Predicate for manifest missing required keys.
+ * Strictly matches exact application schema validation console format.
  */
 export const isMissingKeysAllowedConsole = (text: string, locationUrl?: string): boolean => {
-  const isAnchoredMissing =
-    text.startsWith("Schema validation failed for manifest.json:") ||
-    text.startsWith("Schema validation failed for /data/manifest.json:");
-  if (!isAnchoredMissing) {
+  const isExactMissing = /^Schema validation failed for manifest\.json: (\{.*\}|JSHandle@object)$/.test(text.trim());
+  if (!isExactMissing) {
     return false;
   }
-  if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith("/data/manifest.json")) {
-    return false;
-  }
-  return true;
+  return isTrustedOrigin(locationUrl);
 };
 
 /**
  * Predicate for cross-file dataset_id mismatch error on a specific resource.
+ * Strictly matches exact equality and exact resource location.
  */
 export const createDatasetIdMismatchAllowedConsole = (resourceSuffix: string) => {
   return (text: string, locationUrl?: string): boolean => {
-    const isAnchoredMismatch =
-      text.startsWith(`Lỗi xác thực dataset_id cho ${resourceSuffix}: dataset_id mismatch`) ||
-      text === `dataset_id mismatch (${resourceSuffix})`;
-    if (!isAnchoredMismatch) {
+    const isExactMismatch = text === `Lỗi xác thực dataset_id cho ${resourceSuffix}: dataset_id mismatch`;
+    if (!isExactMismatch) {
       return false;
     }
-    if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith(resourceSuffix)) {
+    if (!locationUrl || !locationUrl.endsWith(resourceSuffix)) {
       return false;
     }
-    return true;
+    return isTrustedOrigin(locationUrl);
   };
 };

@@ -29,11 +29,13 @@ describe('Pure E2E Predicate Functions Unit Tests', () => {
     expect(isStandardBrowser404Console(unexpectedMsg, 'http://localhost/data/manifest.json', '/data/manifest.json')).toBe(false);
     expect(isStandardBrowser404Console(crashMsg, 'http://localhost/data/manifest.json', '/data/manifest.json')).toBe(false);
     expect(isStandardBrowser404Console(valid404, 'http://localhost/data/overview.json', '/data/manifest.json')).toBe(false);
+    expect(isStandardBrowser404Console(valid404, 'https://evil.example/assets/crash.js', '/data/manifest.json')).toBe(false);
   });
 
   it('isManifest404AllowedConsole returns false for non-matching url or unexpected prefix', () => {
     expect(isManifest404AllowedConsole('UNEXPECTED: Failed to load resource 404 in manifest.json', 'http://localhost/data/manifest.json')).toBe(false);
     expect(isManifest404AllowedConsole('Failed to load resource: the server responded with a status of 404 (Not Found)', 'http://localhost/data/overview.json')).toBe(false);
+    expect(isManifest404AllowedConsole('Failed to load resource: the server responded with a status of 404 (Not Found)', 'https://evil.example/assets/crash.js')).toBe(false);
   });
 
   it('createExactRequestFailedPredicate matches exact url suffix', () => {
@@ -41,60 +43,61 @@ describe('Pure E2E Predicate Functions Unit Tests', () => {
     expect(pred('http://localhost:4173/signal-tracker/data/manifest.json')).toBe(true);
     expect(pred('http://localhost:4173/signal-tracker/data/overview.json')).toBe(false);
     expect(pred('http://localhost:4173/signal-tracker/data/manifest.json.bak')).toBe(false);
+    expect(pred('https://evil.example/assets/crash.js')).toBe(false);
   });
 
-  it('createInvalidSymbolAllowedConsole rejects unexpected crashes and wrong URLs', () => {
+  it('createInvalidSymbolAllowedConsole strictly matches browser 404 on symbol endpoint and rejects all other errors', () => {
     const symbolPred = createInvalidSymbolAllowedConsole('UNKNOWNXYZ');
-    const valid404 = 'Failed to load resource: the server responded with a status of 404';
-    const validAppMsg = 'Không tìm thấy dữ liệu cho mã UNKNOWNXYZ';
-    const crashMsg = 'UNEXPECTED RUNTIME CRASH: Không thể tải dữ liệu chi tiết mã UNKNOWNXYZ';
+    const valid404 = 'Failed to load resource: the server responded with a status of 404 (Not Found)';
+    const crashMsg = 'Không thể tải dữ liệu chi tiết mã UNKNOWNXYZ: expected 404; UNEXPECTED RUNTIME CRASH';
 
-    expect(symbolPred(valid404, 'http://localhost/data/symbols/UNKNOWNXYZ.json')).toBe(true);
-    expect(symbolPred(validAppMsg, 'http://localhost/data/symbols/UNKNOWNXYZ.json')).toBe(true);
+    expect(symbolPred(valid404, 'http://localhost:4173/signal-tracker/data/symbols/UNKNOWNXYZ.json')).toBe(true);
 
     // Negative controls
-    expect(symbolPred(crashMsg, 'http://localhost/data/symbols/UNKNOWNXYZ.json')).toBe(false);
-    expect(symbolPred(valid404, 'http://localhost/data/symbols/FPT.json')).toBe(false);
-    expect(symbolPred(validAppMsg, 'http://localhost/data/symbols/FPT.json')).toBe(false);
+    expect(symbolPred(crashMsg, 'https://evil.example/assets/crash.js')).toBe(false);
+    expect(symbolPred(crashMsg, 'http://localhost:4173/signal-tracker/data/symbols/UNKNOWNXYZ.json')).toBe(false);
+    expect(symbolPred(valid404, 'http://localhost:4173/signal-tracker/data/symbols/FPT.json')).toBe(false);
+    expect(symbolPred(valid404, 'https://evil.example/assets/crash.js')).toBe(false);
   });
 
-  it('isMalformedManifestAllowedConsole matches exact syntax errors and rejects unrelated payloads or wrong URL', () => {
-    const jsonError = 'SyntaxError: JSON.parse: unexpected character at line 1';
-    const tokenError = 'SyntaxError: Unexpected token < in JSON';
-    const crashMsg = 'SyntaxError: Unexpected token while parsing unrelated payload';
+  it('isMalformedManifestAllowedConsole matches exact engine syntax errors and rejects unrelated payloads or wrong URL', () => {
+    const jsonError = 'SyntaxError: JSON.parse: unexpected character at line 1 column 1 of the JSON data';
+    const tokenError = 'SyntaxError: Unexpected token < in JSON at position 0';
+    const crashMsg = 'SyntaxError: Unexpected token < while parsing unrelated payload';
 
-    expect(isMalformedManifestAllowedConsole(jsonError, 'http://localhost/data/manifest.json')).toBe(true);
-    expect(isMalformedManifestAllowedConsole(tokenError, 'http://localhost/data/manifest.json')).toBe(true);
+    expect(isMalformedManifestAllowedConsole(jsonError, 'http://localhost:4173/signal-tracker/assets/api.js')).toBe(true);
+    expect(isMalformedManifestAllowedConsole(tokenError, 'http://localhost:4173/signal-tracker/assets/api.js')).toBe(true);
 
     // Negative controls
-    expect(isMalformedManifestAllowedConsole(crashMsg, 'http://localhost/data/manifest.json')).toBe(false);
-    expect(isMalformedManifestAllowedConsole(jsonError, 'http://localhost/data/overview.json')).toBe(false);
+    expect(isMalformedManifestAllowedConsole(crashMsg, 'https://evil.example/assets/crash.js')).toBe(false);
+    expect(isMalformedManifestAllowedConsole(jsonError, 'https://evil.example/assets/crash.js')).toBe(false);
   });
 
   it('isUnsupportedSchemaAllowedConsole and isMissingKeysAllowedConsole match anchored errors', () => {
-    const schemaError = 'Schema validation failed for manifest.json: invalid version';
-    const missingKeyError = 'Schema validation failed for /data/manifest.json: missing key';
+    const schemaError = 'Schema validation failed for manifest.json: JSHandle@object';
+    const schemaErrorObj = 'Schema validation failed for manifest.json: {_errors: [], schema_version: []}';
     const crashMsg = 'UNEXPECTED Schema validation error in custom module';
 
-    expect(isUnsupportedSchemaAllowedConsole(schemaError, 'http://localhost/data/manifest.json')).toBe(true);
-    expect(isMissingKeysAllowedConsole(missingKeyError, 'http://localhost/data/manifest.json')).toBe(true);
+    expect(isUnsupportedSchemaAllowedConsole(schemaError, 'http://localhost:4173/signal-tracker/assets/api.js')).toBe(true);
+    expect(isUnsupportedSchemaAllowedConsole(schemaErrorObj, 'http://localhost:4173/signal-tracker/assets/api.js')).toBe(true);
+    expect(isMissingKeysAllowedConsole(schemaError, 'http://localhost:4173/signal-tracker/assets/api.js')).toBe(true);
 
     // Negative controls
-    expect(isUnsupportedSchemaAllowedConsole(crashMsg, 'http://localhost/data/manifest.json')).toBe(false);
-    expect(isMissingKeysAllowedConsole(crashMsg, 'http://localhost/data/manifest.json')).toBe(false);
-    expect(isUnsupportedSchemaAllowedConsole(schemaError, 'http://localhost/data/screener.json')).toBe(false);
+    expect(isUnsupportedSchemaAllowedConsole(crashMsg, 'https://evil.example/assets/crash.js')).toBe(false);
+    expect(isMissingKeysAllowedConsole(crashMsg, 'https://evil.example/assets/crash.js')).toBe(false);
+    expect(isUnsupportedSchemaAllowedConsole(schemaError, 'https://evil.example/assets/crash.js')).toBe(false);
   });
 
-  it('createDatasetIdMismatchAllowedConsole matches anchored mismatch only on target resource', () => {
+  it('createDatasetIdMismatchAllowedConsole strictly matches exact equality and location', () => {
     const predOverview = createDatasetIdMismatchAllowedConsole('/data/overview.json');
     const validMsg = 'Lỗi xác thực dataset_id cho /data/overview.json: dataset_id mismatch';
-    const crashMsg = 'UNEXPECTED RUNTIME CRASH dataset_id mismatch /data/overview.json';
+    const crashMsg = 'Lỗi xác thực dataset_id cho /data/overview.json: dataset_id mismatch UNEXPECTED RUNTIME CRASH';
 
-    expect(predOverview(validMsg, 'http://localhost/data/overview.json')).toBe(true);
+    expect(predOverview(validMsg, 'http://localhost:4173/signal-tracker/data/overview.json')).toBe(true);
 
     // Negative controls
-    expect(predOverview(crashMsg, 'http://localhost/data/overview.json')).toBe(false);
-    expect(predOverview(validMsg, 'http://localhost/data/screener.json')).toBe(false);
-    expect(predOverview('Lỗi xác thực dataset_id cho /data/screener.json: dataset_id mismatch', 'http://localhost/data/screener.json')).toBe(false);
+    expect(predOverview(crashMsg, 'https://evil.example/assets/crash.js')).toBe(false);
+    expect(predOverview(validMsg, 'https://evil.example/assets/crash.js')).toBe(false);
+    expect(predOverview(validMsg, 'http://localhost:4173/signal-tracker/data/screener.json')).toBe(false);
   });
 });

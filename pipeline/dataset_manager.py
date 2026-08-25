@@ -280,14 +280,17 @@ class DatasetManager:
         if not is_lkg_valid:
             return False, f"LKG dataset corrupted: {lkg_errors}"
 
-        self._assert_safe_destructive_target(self.swap_dir)
-        if os.path.exists(self.swap_dir):
-            shutil.rmtree(self.swap_dir, ignore_errors=True)
+        # Clean and verify stale recovery directories before rollback starts
+        clean_ok, clean_errs = self._clean_stale_recovery_directories()
+        if not clean_ok or os.path.exists(self.swap_dir):
+            return False, "Persistent stale recovery directory could not be cleaned"
 
         had_target = os.path.exists(self.target_dir)
         try:
             if had_target:
                 self._assert_safe_destructive_target(self.target_dir)
+                if os.path.exists(self.swap_dir):
+                    return False, "Persistent stale recovery directory could not be cleaned"
                 shutil.move(self.target_dir, self.swap_dir)
 
             self._assert_safe_destructive_target(self.target_dir)
@@ -303,13 +306,39 @@ class DatasetManager:
                 return False, f"Target verification failed after LKG restoration: {target_errors}"
 
             if os.path.exists(self.swap_dir):
-                shutil.rmtree(self.swap_dir, ignore_errors=True)
+                try:
+                    if is_reparse_point_or_symlink(self.swap_dir):
+                        os.unlink(self.swap_dir)
+                    else:
+                        shutil.rmtree(self.swap_dir)
+                except Exception as ex_clean:
+                    logger.warning(f"Post-rollback cleanup of swap_dir failed (non-fatal): {ex_clean}")
+
             return True, "Successfully rolled back target directory to Last-Known-Good dataset."
         except Exception as e:
             if os.path.exists(self.target_dir):
-                shutil.rmtree(self.target_dir, ignore_errors=True)
+                try:
+                    if is_reparse_point_or_symlink(self.target_dir):
+                        os.unlink(self.target_dir)
+                    else:
+                        shutil.rmtree(self.target_dir)
+                except Exception:
+                    pass
+
             if had_target and os.path.exists(self.swap_dir):
-                shutil.move(self.swap_dir, self.target_dir)
+                try:
+                    shutil.move(self.swap_dir, self.target_dir)
+                except Exception as restore_ex:
+                    logger.error(f"Failed to restore original target from swap during rollback failure: {restore_ex}")
+                    return False, f"LKG rollback failed and target restoration failed: {restore_ex}"
+
             if os.path.exists(self.swap_dir):
-                shutil.rmtree(self.swap_dir, ignore_errors=True)
+                try:
+                    if is_reparse_point_or_symlink(self.swap_dir):
+                        os.unlink(self.swap_dir)
+                    else:
+                        shutil.rmtree(self.swap_dir)
+                except Exception:
+                    pass
+
             return False, f"LKG rollback failed: {e}"

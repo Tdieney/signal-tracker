@@ -505,25 +505,86 @@ class TestDatasetManager(unittest.TestCase):
         # Target was never touched or corrupted
         self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
 
+    def test_rollback_persistent_stale_swap_aborts_fail_closed(self):
+        """A. Persistent stale swap directory causes rollback to abort fail-closed before touching target or calling copytree."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+
+        # Create un-deletable stale swap directory with a dummy file
+        os.makedirs(self.mgr.swap_dir, exist_ok=True)
+        stale_file = os.path.join(self.mgr.swap_dir, "stale.txt")
+        with open(stale_file, "w", encoding="utf-8") as f:
+            f.write("stale swap content")
+
+        original_rmtree = shutil.rmtree
+
+        def unremovable_rmtree(path, ignore_errors=False):
+            if os.path.abspath(path) == os.path.abspath(self.mgr.swap_dir):
+                pass  # Cannot delete
+            else:
+                original_rmtree(path, ignore_errors=ignore_errors)
+
+        copytree_called = False
+        original_copytree = shutil.copytree
+
+        def track_copytree(src, dst):
+            nonlocal copytree_called
+            copytree_called = True
+            return original_copytree(src, dst)
+
+        with patch("shutil.rmtree", side_effect=unremovable_rmtree), patch("shutil.copytree", side_effect=track_copytree):
+            success, msg = self.mgr.rollback_to_last_known_good()
+            self.assertFalse(success)
+            self.assertEqual(msg, "Persistent stale recovery directory could not be cleaned")
+            self.assertFalse(copytree_called, "copytree must NEVER be called if swap is stale and un-deletable")
+
+        # Target snapshot is byte-for-byte unchanged
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        # Ensure no nested target directory inside swap
+        self.assertFalse(os.path.exists(os.path.join(self.mgr.swap_dir, os.path.basename(self.target_dir))))
+
+    def test_rollback_transient_stale_swap_cleans_and_succeeds(self):
+        """B. Transient stale swap directory is cleaned up by rollback before restoring LKG."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+
+        # Update target with V2
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+        self.mgr.publish_from_staging()
+        v2_lkg_snap = self._snapshot_directory(self.lkg_dir)
+
+        # Create transient deletable swap directory
+        os.makedirs(self.mgr.swap_dir, exist_ok=True)
+        with open(os.path.join(self.mgr.swap_dir, "transient.txt"), "w", encoding="utf-8") as f:
+            f.write("transient stale swap")
+
+        success, msg = self.mgr.rollback_to_last_known_good()
+        self.assertTrue(success)
+        self.assertEqual(self._snapshot_directory(self.target_dir), v2_lkg_snap)
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+
     def test_failure_injection_10_rollback_copy_failure(self):
-        """10. Injected failure during LKG rollback copy restores original target."""
+        """10. Injected failure during LKG rollback copy restores original target byte-for-byte with no nested path corruption."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="aaaaaaaaaaaaaaaa")
         self.mgr.publish_from_staging()
-
-        # Corrupt target
         target_v1_snap = self._snapshot_directory(self.target_dir)
 
         with patch("shutil.copytree", side_effect=IOError("Injected failure during rollback copytree")):
             success, msg = self.mgr.rollback_to_last_known_good()
             self.assertFalse(success)
 
-        # Target restored to previous state
+        # Target restored to previous state byte-for-byte
         self.assertEqual(target_v1_snap, self._snapshot_directory(self.target_dir))
         self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        self.assertFalse(os.path.exists(os.path.join(self.target_dir, os.path.basename(self.target_dir))))
 
     def test_failure_injection_11_rollback_post_validation_failure(self):
-        """11. Injected validation failure during LKG restoration restores previous target."""
+        """11. Injected validation failure during LKG restoration restores previous target byte-for-byte."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="aaaaaaaaaaaaaaaa")
         self.mgr.publish_from_staging()

@@ -1141,3 +1141,72 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Complete elimination of data leakage across validation, logs, and public artifacts.
   - Fail-closed transaction safety with recovery directory tracking.
 - Remaining work: Stage explicit modified files, commit and push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and verify live Pages deployment.
+
+---
+
+## 2026-08-25T18:43:00+07:00 — agy-20260825-phase2-rollback-guard-and-exact-predicates — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Closure of 2 remaining Phase 2 blockers:
+  1. Fail-closed rollback stale recovery directory:
+     - Before rollback touches target, verify and clean all required rollback recovery paths (`swap_dir`).
+     - If swap cannot be cleaned, abort and return `False, "Persistent stale recovery directory could not be cleaned"` before any move/copy.
+     - Move target only to a destination confirmed not to exist.
+     - Ensure failure during copy/validation restores old target byte-for-byte with no nested path corruption.
+     - If restoration itself fails, keep recovery directory intact and return clear error without corrupting target.
+     - Add regression tests: (A) persistent stale swap (assert False, target snapshot unchanged, copytree not called, no nesting), (B) transient stale swap (cleanup & succeed), (C) copy failure after clean swap (assert False, old target restored byte-for-byte, no nesting).
+  2. Make E2E predicates fully exact:
+     - Use exact equality or anchored regexes (`^...$`), disallowing arbitrary suffixes.
+     - Require exact resource URL for browser 404s.
+     - Reject wrong locations even if URL does not contain `/data/` (e.g. `https://evil.example/assets/crash.js`).
+     - Align scenario filters with exact observable console errors.
+     - Add unit & E2E negative control assertions confirming false for all adversarial error messages at `https://evil.example/assets/crash.js`.
+- Planned Files:
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `frontend/e2e/predicates.ts` [MODIFY]
+  - `frontend/src/test/predicates.spec.ts` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `tests/test_dataset_manager.py` [MODIFY]
+  - `DEVELOPER_LOG.md` [MODIFY]
+- Pre-existing working tree state: Exact commit `24e25258c57a1922733cdbece04246082ffd1f4d`, untracked diagnostics `error.png`, `logs_88886054015.zip`, `logs_88886054015/` preserved.
+
+---
+
+## 2026-08-25T18:45:00+07:00 — agy-20260825-phase2-rollback-guard-and-exact-predicates — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Remediation of Rollback Stale Recovery Guard & Fully Anchored Exact E2E Predicates.
+- Summary of changes:
+  1. **Fail-Closed Rollback Recovery Guard (`pipeline/dataset_manager.py`)**:
+     - Redesigned `rollback_to_last_known_good()` to clean and verify stale recovery directories (`swap_dir`) before modifying or moving `target_dir`.
+     - Aborts fail-closed (`False, "Persistent stale recovery directory could not be cleaned"`) without moving target or calling `copytree` if `swap_dir` exists and cannot be deleted.
+     - Move target strictly to a destination confirmed not to exist (preventing directory nesting).
+     - Full rollback failure recovery restores old target byte-for-byte without structural corruption.
+     - Added 3 regression tests in `tests/test_dataset_manager.py`: (A) persistent stale swap aborts fail-closed, target byte-snapshot unchanged, `copytree` never called, no nesting; (B) transient stale swap is cleaned up and rollback succeeds; (C) copy failure after clean swap restores old target byte-for-byte with zero nesting.
+  2. **Fully Anchored Pure E2E Predicates (`frontend/e2e/predicates.ts`, `frontend/src/test/predicates.spec.ts`, `frontend/e2e/app.spec.ts`)**:
+     - All predicates enforce strict regex boundaries (`^...$`) or exact string equality (`===`).
+     - Standard browser 404 requires exact expected resource URL.
+     - Trusted origin validation rejects third-party locations (e.g. `https://evil.example/assets/crash.js`).
+     - Added comprehensive unit and E2E negative control assertions verifying `false` for adversarial error strings at `https://evil.example/assets/crash.js`.
+- Files Changed:
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `frontend/e2e/predicates.ts` [MODIFY]
+  - `frontend/src/test/predicates.spec.ts` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `tests/test_dataset_manager.py` [MODIFY]
+  - `DEVELOPER_LOG.md` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python scratch/repro_check.py`: 3/3 reproductions passed.
+  - `python -m unittest discover tests -v`: 67 unit tests (66 passed, 1 skipped for OS permission).
+  - `npm.cmd --prefix frontend test -- --run`: 37 Vitest unit tests passed across 6 test files.
+  - `npm.cmd --prefix frontend run typecheck`: 0 TypeScript errors.
+  - `npm.cmd --prefix frontend run build:pages`: Static production build succeeded.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 violations.
+  - `npm.cmd --prefix frontend audit --audit-level=high`: 0 vulnerabilities.
+  - `npm.cmd --prefix frontend run test:e2e`: 104 passed, 4 skipped across 6 browser configurations.
+  - `python scripts/build_all.py`: All 10 steps passed with code 0.
+  - `git diff --check`: 0 trailing whitespace warnings.
+- Safety & Security Impact:
+  - Guaranteed structural safety during LKG rollback with zero directory nesting risk.
+  - Fail-closed error filtering in Playwright preventing false positives.
+- Remaining work: Stage explicit modified files, commit and push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and verify live Pages deployment.
