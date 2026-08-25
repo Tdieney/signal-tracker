@@ -32,7 +32,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             <div className="brand-logo-icon" aria-hidden="true">
               <Activity size={20} />
             </div>
-            <span>VN Stock Signal</span>
+            <span className="brand-title-text">VN Stock Signal</span>
           </a>
 
           {/* Navigation */}

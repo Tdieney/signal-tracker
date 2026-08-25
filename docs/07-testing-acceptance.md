@@ -55,17 +55,18 @@ Core journeys:
 7. Dataset stale/partial → banner vẫn thấy trên các route liên quan.
 8. Direct load hash detail URL hoạt động trên Pages-like base path.
 
-## 2. Viewport matrix
+## 2. Viewport matrix & Playwright Projects
 
-Chạy ít nhất các viewport:
+Chạy bộ test đa trình duyệt và thiết bị qua 6 Playwright projects:
 
-| Nhóm | Kích thước |
-| --- | --- |
-| Mobile nhỏ | `320 × 568` |
-| Mobile phổ biến | `390 × 844` |
-| Tablet portrait | `768 × 1024` |
-| Laptop | `1024 × 768` |
-| Desktop | `1440 × 900` |
+| Project Name | Nhóm thiết bị | Kích thước Viewport |
+| :--- | :--- | :--- |
+| `chromium-mobile-320` | Mobile nhỏ (iPhone SE) | `320 × 568` |
+| `chromium-mobile-390` | Mobile phổ biến (iPhone 14) | `390 × 844` |
+| `chromium-tablet-768` | Tablet portrait | `768 × 1024` |
+| `chromium-desktop-1440`| Desktop Chromium | `1440 × 900` |
+| `firefox-desktop-1440` | Desktop Firefox | `1440 × 900` |
+| `webkit-desktop-1440`  | Desktop Safari / WebKit | `1440 × 900` |
 
 Ở từng viewport kiểm tra:
 

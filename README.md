@@ -141,7 +141,7 @@ python scripts/build_all.py
    python scripts/security_check.py --artifact frontend/dist
    ```
 
-6. **Kiểm thử E2E & Accessibility đa trình duyệt (Playwright 98 tests + Axe)**:
+6. **Kiểm thử E2E & Accessibility đa trình duyệt (Playwright 98 tests trên 6 projects + Axe)**:
    ```bash
    npm --prefix frontend run test:e2e
    ```

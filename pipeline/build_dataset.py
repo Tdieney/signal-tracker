@@ -211,7 +211,7 @@ def main() -> None:
     parser.add_argument("--output", default="frontend/public/data", help="Output directory for JSON")
     parser.add_argument("--staging", default=None, help="Optional staging temporary directory")
     parser.add_argument("--as-of", default=None, help="Target as-of date (YYYY-MM-DD)")
-    parser.add_argument("--universe", default="ALL", help="Universe name")
+    parser.add_argument("--universe", default="ALL", choices=["ALL", "VN30"], help="Universe name")
     parser.add_argument("--generated-at", default=None, help="Fixed ISO timestamp for deterministic test builds")
 
     args = parser.parse_args()

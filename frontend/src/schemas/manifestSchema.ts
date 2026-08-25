@@ -4,7 +4,7 @@ export const FreshnessStatusSchema = z.enum(['FRESH', 'STALE', 'UNKNOWN']);
 export const QualityStatusSchema = z.enum(['PASS', 'PARTIAL', 'FAIL']);
 export const MarketSessionStatusSchema = z.enum(['CLOSED_CONFIRMED', 'UNKNOWN']);
 export const ProviderSchema = z.enum(['csv', 'vnstock', 'company_api']);
-export const UniverseSchema = z.enum(['ALL', 'VN30', 'ALL_PLUS_VN30']);
+export const UniverseSchema = z.enum(['ALL', 'VN30']);
 
 export const ManifestSchema = z.object({
   schema_version: z.string().regex(/^1\.\d+\.\d+$/, 'Chỉ hỗ trợ schema phiên bản 1.x.x'),

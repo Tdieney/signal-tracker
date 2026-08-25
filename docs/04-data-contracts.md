@@ -169,7 +169,10 @@ frontend/public/data/
 - `market_session_status`: `CLOSED_CONFIRMED` | `UNKNOWN`. Giá trị an toàn mặc định là `UNKNOWN` đối với fixture/offline data (bỏ enum DEMO để tránh contract drift; tính chất demo được nhận diện qua `provider: "csv"` và `freshness.status: "UNKNOWN"`).
 - `freshness.status`: `FRESH` | `STALE` | `UNKNOWN`.
 - `provider`: `csv` | `vnstock` | `company_api`. Tên public không nhạy cảm.
+- `universe`: `ALL` | `VN30`. Danh sách các universe được hỗ trợ chính thức trong Phase 1.
+- `quality.status`: `PASS` | `PARTIAL` | `FAIL`. Trong đó `PASS` chỉ áp dụng khi zero rejected rows và zero warnings.
 - `dataset_id`: Chuỗi băm SHA-256 16 ký tự hex (`^[a-f0-9]{16}$`) tính từ canonical sorted JSON của toàn bộ input dữ liệu công khai và quality metadata. Trường `generated_at` là volatile timestamp nên được loại khỏi canonical identity payload để đảm bảo tính tất định.
+- Tỷ lệ phần trăm trong `overview.metrics` và `overview.breadth_history` được làm tròn chuẩn 1 chữ số thập phân theo công thức `round(count / eligible_count * 100, 1)`. Khi `eligible_count == 0`, giá trị là `null`.
 
 ## 7. `overview.json`
 

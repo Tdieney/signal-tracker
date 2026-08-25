@@ -105,13 +105,19 @@ SCHEMA_VERSION_REGEX = re.compile(r"^\d+\.\d+\.\d+$")
 SYMBOL_REGEX = re.compile(r"^[A-Z0-9]{1,10}$")
 
 VALID_PROVIDERS = {"csv", "vnstock", "company_api"}
-VALID_UNIVERSES = {"ALL", "VN30", "VN100"}
+VALID_UNIVERSES = {"ALL", "VN30"}
 VALID_FRESHNESS_STATUSES = {"FRESH", "STALE", "UNKNOWN"}
 VALID_MARKET_SESSION_STATUSES = {"CLOSED_CONFIRMED", "UNKNOWN"}
-VALID_QUALITY_STATUSES = {"PASS", "PARTIAL", "WARNING", "FAIL"}
+VALID_QUALITY_STATUSES = {"PASS", "PARTIAL", "FAIL"}
 VALID_EXCHANGES = {"HOSE", "HNX", "UPCOM"}
 VALID_SIGNALS = {"ABOVE_MA10", "BELOW_MA10", "CROSS_UP_MA10", "CROSS_DOWN_MA10"}
 VALID_DATA_STATUSES = {"VALID", "INSUFFICIENT_DATA", "NO_DATA_FOR_AS_OF_DATE", "INVALID_DATA"}
+
+EXEMPT_SOURCE_FILES = {
+    "scripts/security_check.py",
+    "tests/test_security_check.py",
+    "tests/test_csv_provider.py",
+}
 
 
 def is_valid_calendar_date(date_str: str) -> bool:
@@ -126,6 +132,18 @@ def is_valid_calendar_date(date_str: str) -> bool:
         return False
 
 
+def is_valid_iso_timestamp(ts_str: str) -> bool:
+    """Validate that ts_str is a syntactically and calendar-valid ISO 8601 timestamp."""
+    if not isinstance(ts_str, str) or not ISO_TIMESTAMP_REGEX.match(ts_str):
+        return False
+    try:
+        clean_ts = ts_str.replace("Z", "+00:00")
+        datetime.datetime.fromisoformat(clean_ts)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def is_finite_number(val: Any) -> bool:
     """Check that val is int or float and is finite (not NaN or Inf)."""
     if isinstance(val, bool):
@@ -133,6 +151,16 @@ def is_finite_number(val: Any) -> bool:
     if isinstance(val, (int, float)):
         return math.isfinite(val)
     return False
+
+
+def is_positive_finite_number(val: Any) -> bool:
+    """Check that val is a finite number > 0."""
+    return is_finite_number(val) and val > 0
+
+
+def is_nonnegative_finite_number(val: Any) -> bool:
+    """Check that val is a finite number >= 0."""
+    return is_finite_number(val) and val >= 0
 
 
 def parse_csp_directives(csp_string: str) -> Tuple[Dict[str, List[str]], List[str]]:
@@ -150,7 +178,6 @@ def parse_csp_directives(csp_string: str) -> Tuple[Dict[str, List[str]], List[st
                 errors.append(f"Duplicate CSP directive '{name}' detected")
             directives[name] = values
 
-            # Proactive check for unsafe tokens
             for tok in values:
                 if tok in ("'unsafe-inline'", "'unsafe-eval'", "*"):
                     errors.append(f"Forbidden CSP token '{tok}' in directive '{name}'")
@@ -192,7 +219,6 @@ def check_csp_meta_tag(html_content: str, filename: str) -> List[str]:
     if extra:
         violations.append(f"Unexpected extra CSP directives: {sorted(extra)} in {filename}")
 
-    # Verify exact tokens for each directive
     for dir_name, expected_tokens in EXACT_CSP_SPEC.items():
         if dir_name in directives:
             actual_tokens = set(directives[dir_name])
@@ -283,8 +309,9 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
             if actual_keys - expected_keys:
                 violations.append(f"manifest.json unexpected top-level keys: {actual_keys - expected_keys}")
 
-        if not isinstance(data.get("generated_at"), str) or not ISO_TIMESTAMP_REGEX.match(data.get("generated_at", "")):
-            violations.append(f"manifest.json generated_at must be ISO 8601 UTC timestamp: {data.get('generated_at')}")
+        gen_at = data.get("generated_at")
+        if not is_valid_iso_timestamp(gen_at):
+            violations.append(f"manifest.json generated_at must be valid ISO 8601 UTC timestamp: {gen_at}")
 
         if data.get("market_timezone") != "Asia/Ho_Chi_Minh":
             violations.append(f"manifest.json market_timezone must be 'Asia/Ho_Chi_Minh', got: {data.get('market_timezone')}")
@@ -342,6 +369,10 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
                 if in_rows != acc_rows + rej_rows:
                     violations.append(f"manifest.json quality row accounting invariant violated: input_rows ({in_rows}) != accepted_rows ({acc_rows}) + rejected_rows ({rej_rows})")
 
+            if isinstance(elig_sym, int) and isinstance(acc_rows, int):
+                if elig_sym > acc_rows:
+                    violations.append(f"manifest.json quality eligible_symbols ({elig_sym}) > accepted_rows ({acc_rows})")
+
             warnings = quality.get("warnings")
             if not isinstance(warnings, list):
                 violations.append("manifest.json quality.warnings must be a list")
@@ -389,11 +420,24 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
                     if isinstance(cnt_val, bool) or not isinstance(cnt_val, int) or cnt_val < 0:
                         violations.append(f"overview.json metrics.{cnt_name} must be non-negative integer, got: {cnt_val}")
 
-                # Percentages
+                # Percentages validation & math consistency
                 for pct_name, pct_val in [("above_pct", abv_p), ("below_pct", bel_p)]:
                     if pct_val is not None:
                         if not is_finite_number(pct_val) or not (0.0 <= pct_val <= 100.0):
                             violations.append(f"overview.json metrics.{pct_name} must be finite number in [0, 100] or null, got: {pct_val}")
+
+                if isinstance(elig, int) and elig > 0:
+                    if isinstance(abv, int):
+                        expected_abv_pct = round(abv / elig * 100, 1)
+                        if abv_p is None or abs(abv_p - expected_abv_pct) > 0.05:
+                            violations.append(f"overview.json above_pct ({abv_p}) does not match above_count/eligible_count ({expected_abv_pct})")
+                    if isinstance(bel, int):
+                        expected_bel_pct = round(bel / elig * 100, 1)
+                        if bel_p is None or abs(bel_p - expected_bel_pct) > 0.05:
+                            violations.append(f"overview.json below_pct ({bel_p}) does not match below_count/eligible_count ({expected_bel_pct})")
+                elif elig == 0:
+                    if abv_p is not None or bel_p is not None:
+                        violations.append("overview.json percentages must be null when eligible_count is 0")
 
                 # Invariants
                 if isinstance(elig, int) and isinstance(abv, int) and isinstance(bel, int) and isinstance(on_m, int):
@@ -432,6 +476,11 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
                         violations.append(f"overview.json breadth_history[{idx}].above_count invalid: {h_abv}")
                     if h_pct is not None and (not is_finite_number(h_pct) or not (0.0 <= h_pct <= 100.0)):
                         violations.append(f"overview.json breadth_history[{idx}].above_pct must be in [0, 100] or null")
+
+                    if isinstance(h_elig, int) and isinstance(h_abv, int) and h_elig > 0:
+                        expected_h_pct = round(h_abv / h_elig * 100, 1)
+                        if h_pct is None or abs(h_pct - expected_h_pct) > 0.05:
+                            violations.append(f"overview.json breadth_history[{idx}].above_pct ({h_pct}) does not match above_count/eligible_count ({expected_h_pct})")
 
     elif filename == "screener.json":
         expected_keys = {"schema_version", "dataset_id", "as_of_date", "items"}
@@ -473,14 +522,29 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
                 if sig is not None and sig not in VALID_SIGNALS:
                     violations.append(f"screener.json items[{idx}].signal invalid: {sig}")
 
+                s_reason = item.get("signal_reason")
+                if s_reason is not None and (not isinstance(s_reason, str) or not s_reason.strip()):
+                    violations.append(f"screener.json items[{idx}].signal_reason must be non-empty string or null")
+
                 d_status = item.get("data_status")
                 if d_status not in VALID_DATA_STATUSES:
                     violations.append(f"screener.json items[{idx}].data_status invalid: {d_status}")
 
-                for f_name in ["close", "ma10", "distance_pct", "avg_volume_20d"]:
-                    v = item.get(f_name)
-                    if v is not None and not is_finite_number(v):
-                        violations.append(f"screener.json items[{idx}].{f_name} must be finite number or null, got: {v}")
+                close_val = item.get("close")
+                if close_val is not None and not is_positive_finite_number(close_val):
+                    violations.append(f"screener.json items[{idx}].close must be positive finite number or null, got: {close_val}")
+
+                ma10_val = item.get("ma10")
+                if ma10_val is not None and not is_positive_finite_number(ma10_val):
+                    violations.append(f"screener.json items[{idx}].ma10 must be positive finite number or null, got: {ma10_val}")
+
+                dist_val = item.get("distance_pct")
+                if dist_val is not None and not is_finite_number(dist_val):
+                    violations.append(f"screener.json items[{idx}].distance_pct must be finite number or null, got: {dist_val}")
+
+                avg_vol = item.get("avg_volume_20d")
+                if avg_vol is not None and not is_nonnegative_finite_number(avg_vol):
+                    violations.append(f"screener.json items[{idx}].avg_volume_20d must be non-negative finite number or null, got: {avg_vol}")
 
                 vol = item.get("volume")
                 if vol is not None and (isinstance(vol, bool) or not isinstance(vol, int) or vol < 0):
@@ -504,10 +568,22 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
         if not isinstance(latest, dict) or set(latest.keys()) != {"close", "ma10", "distance_pct", "signal", "data_status"}:
             violations.append(f"symbol detail 'latest' invalid shape in {rel_path}")
         else:
-            if latest.get("signal") is not None and latest.get("signal") not in VALID_SIGNALS:
-                violations.append(f"symbol detail latest.signal invalid '{latest.get('signal')}' in {rel_path}")
-            if latest.get("data_status") not in VALID_DATA_STATUSES:
-                violations.append(f"symbol detail latest.data_status invalid '{latest.get('data_status')}' in {rel_path}")
+            lat_close = latest.get("close")
+            lat_ma10 = latest.get("ma10")
+            lat_dist = latest.get("distance_pct")
+            lat_sig = latest.get("signal")
+            lat_stat = latest.get("data_status")
+
+            if lat_close is not None and not is_positive_finite_number(lat_close):
+                violations.append(f"symbol detail latest.close must be positive finite number in {rel_path}")
+            if lat_ma10 is not None and not is_positive_finite_number(lat_ma10):
+                violations.append(f"symbol detail latest.ma10 must be positive finite number or null in {rel_path}")
+            if lat_dist is not None and not is_finite_number(lat_dist):
+                violations.append(f"symbol detail latest.distance_pct must be finite number or null in {rel_path}")
+            if lat_sig is not None and lat_sig not in VALID_SIGNALS:
+                violations.append(f"symbol detail latest.signal invalid '{lat_sig}' in {rel_path}")
+            if lat_stat not in VALID_DATA_STATUSES:
+                violations.append(f"symbol detail latest.data_status invalid '{lat_stat}' in {rel_path}")
 
         series = data.get("series")
         if not isinstance(series, list):
@@ -531,10 +607,14 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
                 s_low = s_item.get("low")
                 s_close = s_item.get("close")
                 for p_name, p_val in [("open", s_open), ("high", s_high), ("low", s_low), ("close", s_close)]:
-                    if not is_finite_number(p_val) or p_val <= 0:
-                        violations.append(f"symbol detail series[{s_idx}].{p_name} must be positive number in {rel_path}")
+                    if not is_positive_finite_number(p_val):
+                        violations.append(f"symbol detail series[{s_idx}].{p_name} must be positive finite number in {rel_path}")
 
-                if is_finite_number(s_open) and is_finite_number(s_high) and is_finite_number(s_low) and is_finite_number(s_close):
+                s_ma10 = s_item.get("ma10")
+                if s_ma10 is not None and not is_positive_finite_number(s_ma10):
+                    violations.append(f"symbol detail series[{s_idx}].ma10 must be positive finite number or null in {rel_path}")
+
+                if is_positive_finite_number(s_open) and is_positive_finite_number(s_high) and is_positive_finite_number(s_low) and is_positive_finite_number(s_close):
                     if s_high < max(s_open, s_close, s_low) or s_low > min(s_open, s_close, s_high):
                         violations.append(f"symbol detail series[{s_idx}] OHLC invariant violated in {rel_path}")
 
@@ -549,6 +629,14 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
         explanation = data.get("explanation")
         if not isinstance(explanation, dict) or set(explanation.keys()) != {"current_close", "current_ma10", "previous_close", "previous_ma10", "rule"}:
             violations.append(f"symbol detail 'explanation' invalid shape in {rel_path}")
+        else:
+            for exp_f in ["current_close", "current_ma10", "previous_close", "previous_ma10"]:
+                exp_v = explanation.get(exp_f)
+                if exp_v is not None and not is_positive_finite_number(exp_v):
+                    violations.append(f"symbol detail explanation.{exp_f} must be positive finite number or null in {rel_path}")
+            rule_v = explanation.get("rule")
+            if not isinstance(rule_v, str) or not rule_v.strip():
+                violations.append(f"symbol detail explanation.rule must be non-empty string in {rel_path}")
 
     return violations, data
 
@@ -657,7 +745,6 @@ def check_artifact_directory(artifact_dir: str) -> List[str]:
                 if envelope.get("schema_version") != expected_schema:
                     violations.append(f"Cross-file schema_version mismatch in {file_rel}: {envelope.get('schema_version')} != {expected_schema}")
 
-        # Check screener symbols match symbols/ directory files
         disk_symbol_files = {
             f[:-5] for f in os.listdir(os.path.join(artifact_dir, "data", "symbols"))
             if f.endswith(".json")
@@ -687,9 +774,14 @@ def scan_source_for_secrets(root_dir: str) -> List[str]:
         for f in files:
             full_path = os.path.join(root, f)
             rel_path = os.path.relpath(full_path, root_dir)
+            rel_posix = rel_path.replace("\\", "/")
 
             if f.startswith(".env") and f != ".env.example":
                 violations.append(f"Uncommitted or untracked .env file found: {rel_path}")
+
+            # Exact normalized relative-path allow-list check
+            if rel_posix in EXEMPT_SOURCE_FILES:
+                continue
 
             _, ext = os.path.splitext(f)
             ext_lower = ext.lower()
@@ -700,8 +792,7 @@ def scan_source_for_secrets(root_dir: str) -> List[str]:
 
                         for pat in SECRET_PATTERNS:
                             if pat.search(content):
-                                if "SECRET_PATTERNS" not in content and "security_check.py" not in rel_path and "test_security_check.py" not in rel_path and "test_csv_provider.py" not in rel_path:
-                                    violations.append(f"Suspicious secret pattern in {rel_path}")
+                                violations.append(f"Suspicious secret pattern in {rel_path}")
 
                         if ext_lower in {".tsx", ".jsx"}:
                             if style_prop_pattern.search(content):

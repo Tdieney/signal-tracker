@@ -54,11 +54,40 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await page.goto('#/');
     await page.waitForSelector('h1');
 
-    // 1. Verify no horizontal scrollbar overflow
-    const hasHorizontalOverflow = await page.evaluate(() => {
-      return document.documentElement.scrollWidth > window.innerWidth;
+    // 1. Diagnostic assertion for zero horizontal scrollbar overflow
+    const overflowDiagnostics = await page.evaluate(() => {
+      const docWidth = document.documentElement.scrollWidth;
+      const winWidth = window.innerWidth;
+      const hasOverflow = docWidth > winWidth;
+      const culprits: any[] = [];
+      if (hasOverflow) {
+        const allEls = document.querySelectorAll('*');
+        allEls.forEach((el) => {
+          const rect = el.getBoundingClientRect();
+          const scrollW = el.scrollWidth;
+          const clientW = el.clientWidth;
+          if (rect.right > winWidth + 1) {
+            culprits.push({
+              tagName: el.tagName,
+              id: el.id,
+              className: el.className,
+              rect: { left: rect.left, right: rect.right, width: rect.width },
+              scrollWidth: scrollW,
+              clientWidth: clientW,
+            });
+          }
+        });
+      }
+      return { hasOverflow, docWidth, winWidth, culprits };
     });
-    expect(hasHorizontalOverflow).toBe(false);
+
+    if (overflowDiagnostics.hasOverflow) {
+      console.error(
+        `Horizontal overflow detected! scrollWidth=${overflowDiagnostics.docWidth}px > innerWidth=${overflowDiagnostics.winWidth}px. Culprits:`,
+        JSON.stringify(overflowDiagnostics.culprits, null, 2)
+      );
+    }
+    expect(overflowDiagnostics.hasOverflow).toBe(false);
 
     // 2. Verify brand link and navigation
     await expect(page.locator('a.brand-link')).toBeVisible();
@@ -198,7 +227,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Invalid symbol route renders symbol not found error state', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['XYZ.json', '404', 'Không thể tải']);
+    await setupPageListeners(page, errors, ['symbols/XYZ.json', '404', 'Not Found']);
 
     await page.goto('#/symbols/XYZ');
     const notFoundCard = page.locator('[data-testid="symbol-not-found-card"]');
@@ -211,7 +240,6 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     page,
     isMobile,
   }) => {
-    // Only runs on mobile projects where the drawer trigger is visible
     test.skip(!isMobile, 'FilterDrawer is mobile only');
 
     const errors: string[] = [];
@@ -234,7 +262,6 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
     await expect(closeBtn).toBeVisible();
     await expect(applyBtn).toBeVisible();
-    // Deterministic initial focus assertion
     await expect(closeBtn).toBeFocused();
 
     // 2. Verify background isolation (app shell root has inert and aria-hidden)
@@ -341,7 +368,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     page,
   }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['manifest.json', '404', 'Lỗi xác thực']);
+    await setupPageListeners(page, errors, ['data/manifest.json', '404', 'Not Found']);
 
     await page.route('**/data/manifest.json', (route) =>
       route.fulfill({ status: 404, body: 'Not Found' })
@@ -356,6 +383,10 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await expect(page.locator('.metric-card')).toHaveCount(0);
     await expect(page.locator('.chart-panel')).toHaveCount(0);
 
+    const cspViolations = await getCapturedCSPViolations(page);
+    expect(cspViolations).toEqual([]);
+    expect(errors).toEqual([]);
+
     // Test retry recovery when manifest is restored
     await page.unroute('**/data/manifest.json');
     const retryBtn = errorCard.locator('button:has-text("Thử lại")');
@@ -367,7 +398,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Fail-closed matrix: Malformed manifest JSON renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['manifest.json', 'JSON', 'Lỗi xác thực']);
+    await setupPageListeners(page, errors, ['data/manifest.json', 'JSON.parse', 'SyntaxError']);
 
     await page.route('**/data/manifest.json', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"schema_version": invalid...' })
@@ -377,11 +408,15 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errorCard = page.locator('[data-testid="manifest-error"]');
     await expect(errorCard).toBeVisible();
     await expect(page.locator('.metric-card')).toHaveCount(0);
+
+    const cspViolations = await getCapturedCSPViolations(page);
+    expect(cspViolations).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('Fail-closed matrix: Unsupported manifest schema version renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['manifest.json', 'schema_version', 'Lỗi xác thực']);
+    await setupPageListeners(page, errors, ['data/manifest.json', 'Schema validation failed for manifest.json']);
 
     await page.route('**/data/manifest.json', async (route) => {
       const response = await route.fetch();
@@ -394,11 +429,15 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errorCard = page.locator('[data-testid="manifest-error"]');
     await expect(errorCard).toBeVisible();
     await expect(page.locator('.metric-card')).toHaveCount(0);
+
+    const cspViolations = await getCapturedCSPViolations(page);
+    expect(cspViolations).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('Fail-closed matrix: Manifest missing required keys renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['manifest.json', 'Lỗi xác thực']);
+    await setupPageListeners(page, errors, ['data/manifest.json', 'Schema validation failed for manifest.json']);
 
     await page.route('**/data/manifest.json', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"schema_version": "1.0.0"}' })
@@ -408,11 +447,15 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errorCard = page.locator('[data-testid="manifest-error"]');
     await expect(errorCard).toBeVisible();
     await expect(page.locator('.metric-card')).toHaveCount(0);
+
+    const cspViolations = await getCapturedCSPViolations(page);
+    expect(cspViolations).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('Fail-closed matrix: Overview dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['overview.json', 'dataset_id mismatch']);
+    await setupPageListeners(page, errors, ['dataset_id mismatch']);
 
     await page.route('**/data/overview.json', async (route) => {
       const response = await route.fetch();
@@ -425,11 +468,15 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errorBanner = page.locator('.status-banner-danger, .status-banner');
     await expect(errorBanner.first()).toBeVisible({ timeout: 10000 });
     await expect(errorBanner.first()).toContainText('dataset_id mismatch');
+
+    const cspViolations = await getCapturedCSPViolations(page);
+    expect(cspViolations).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('Fail-closed matrix: Screener dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['screener.json', 'dataset_id mismatch']);
+    await setupPageListeners(page, errors, ['dataset_id mismatch']);
 
     await page.route('**/data/screener.json', async (route) => {
       const response = await route.fetch();
@@ -442,11 +489,15 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errorBanner = page.locator('.status-banner-danger, .status-banner');
     await expect(errorBanner.first()).toBeVisible({ timeout: 10000 });
     await expect(errorBanner.first()).toContainText('dataset_id mismatch');
+
+    const cspViolations = await getCapturedCSPViolations(page);
+    expect(cspViolations).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('Fail-closed matrix: Symbol Detail dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['FPT.json', 'dataset_id mismatch']);
+    await setupPageListeners(page, errors, ['dataset_id mismatch']);
 
     await page.route('**/data/symbols/FPT.json', async (route) => {
       const response = await route.fetch();
@@ -459,6 +510,10 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errorBanner = page.locator('.status-banner-danger, .status-banner');
     await expect(errorBanner.first()).toBeVisible({ timeout: 10000 });
     await expect(errorBanner.first()).toContainText('dataset_id mismatch');
+
+    const cspViolations = await getCapturedCSPViolations(page);
+    expect(cspViolations).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
 });
