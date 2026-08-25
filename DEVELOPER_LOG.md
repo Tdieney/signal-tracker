@@ -1430,4 +1430,6 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Zero external network requests during builds, test suites, or CI pipelines.
   - Verified demo CSV dataset (`dataset_id="2ea695ca7b138940"`, `provider="csv"`, `freshness.status="UNKNOWN"`, `market_session_status="UNKNOWN"`).
   - Unapproved live provider quarantined and fail-closed.
-- Remaining work: Stage explicit files, commit via forward commit, push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and smoke test live Pages deployment across viewports.
+- Decisions & Direction:
+  - Repository owner explicitly confirmed maintaining the safe Demo Fixture CSV mode (100% deterministic, offline, zero legal/TOS exposure).
+- Status: COMPLETED. GitHub Pages is live, secure, verified, and in full compliance with owner approval and reviewer requirements.
