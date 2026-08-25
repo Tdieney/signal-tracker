@@ -81,12 +81,10 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
       return { hasOverflow, docWidth, winWidth, culprits };
     });
 
-    if (overflowDiagnostics.hasOverflow) {
-      console.error(
-        `Horizontal overflow detected! scrollWidth=${overflowDiagnostics.docWidth}px > innerWidth=${overflowDiagnostics.winWidth}px. Culprits:`,
-        JSON.stringify(overflowDiagnostics.culprits, null, 2)
-      );
-    }
+    expect(
+      overflowDiagnostics.culprits,
+      `Horizontal overflow detected! scrollWidth=${overflowDiagnostics.docWidth}px > innerWidth=${overflowDiagnostics.winWidth}px`
+    ).toEqual([]);
     expect(overflowDiagnostics.hasOverflow).toBe(false);
 
     // 2. Verify brand link and navigation
