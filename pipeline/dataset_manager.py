@@ -123,6 +123,23 @@ class DatasetManager:
         except Exception as e:
             return False, [f"Validation exception on {dir_path}: {e}"]
 
+    def _clean_stale_recovery_directories(self) -> Tuple[bool, List[str]]:
+        """Clean stale temporary recovery directories and verify they are completely gone."""
+        recovery_dirs = [self.swap_dir, self.lkg_tmp, self.lkg_swap]
+        for d in recovery_dirs:
+            self._assert_safe_destructive_target(d)
+            if os.path.exists(d):
+                try:
+                    if is_reparse_point_or_symlink(d):
+                        os.unlink(d)
+                    else:
+                        shutil.rmtree(d)
+                except Exception as ex:
+                    logger.warning(f"Failed to remove recovery directory: {ex}")
+                if os.path.exists(d):
+                    return False, ["Persistent stale recovery directory could not be cleaned"]
+        return True, []
+
     def verify_staging(self) -> Tuple[bool, List[str]]:
         """Deep validate staging directory against security rules and data contracts."""
         return self._verify_directory(self.staging_dir)
@@ -133,22 +150,14 @@ class DatasetManager:
         if not is_valid:
             return False, errors
 
+        # 1. Clean and verify stale recovery directories before transaction starts
+        clean_ok, clean_errs = self._clean_stale_recovery_directories()
+        if not clean_ok:
+            return False, clean_errs
+
         had_target = os.path.exists(self.target_dir)
         had_lkg = os.path.exists(self.lkg_dir)
         committed = False
-
-        # 1. Clean swap directories
-        self._assert_safe_destructive_target(self.swap_dir)
-        if os.path.exists(self.swap_dir):
-            shutil.rmtree(self.swap_dir, ignore_errors=True)
-
-        self._assert_safe_destructive_target(self.lkg_tmp)
-        if os.path.exists(self.lkg_tmp):
-            shutil.rmtree(self.lkg_tmp, ignore_errors=True)
-
-        self._assert_safe_destructive_target(self.lkg_swap)
-        if os.path.exists(self.lkg_swap):
-            shutil.rmtree(self.lkg_swap, ignore_errors=True)
 
         try:
             # 2. Back up existing target to swap_dir
@@ -211,6 +220,7 @@ class DatasetManager:
             # Failures in subsequent cleanup MUST NOT cause split-brain or revert target.
             # =========================================================================
             committed = True
+            warnings: List[str] = []
 
             # 9. Post-commit cleanup of temporary recovery directories
             try:
@@ -225,13 +235,17 @@ class DatasetManager:
             except Exception as ex_clean_swap:
                 logger.warning(f"Post-commit cleanup of swap_dir failed (non-fatal): {ex_clean_swap}")
 
-            return True, []
+            # Check if any recovery directory remains
+            if (had_lkg and os.path.exists(self.lkg_swap)) or os.path.exists(self.swap_dir) or os.path.exists(self.lkg_tmp):
+                warnings.append("Post-commit warning: temporary recovery directory cleanup incomplete")
+
+            return True, warnings
 
         except Exception as e:
             if committed:
                 # Post-commit exception: target and LKG are already valid V2. Do NOT roll back to V1!
                 logger.error(f"Post-commit error during final cleanup: {e}")
-                return True, [f"Post-commit warning: {e}"]
+                return True, ["Post-commit warning: temporary recovery directory cleanup incomplete"]
 
             # Pre-commit full recovery: restore both target and LKG to V1 byte-for-byte
             if os.path.exists(self.lkg_tmp):

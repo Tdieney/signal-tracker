@@ -1,6 +1,5 @@
 """Unit tests for BaseMarketDataProvider implementations, provider contracts, and adversarial secret containment."""
 
-import io
 import json
 import logging
 import os
@@ -21,6 +20,17 @@ from pipeline.providers.base import (
 from pipeline.providers.company_api_provider import CompanyApiDataProvider
 from pipeline.providers.csv_provider import CsvDataProvider
 from pipeline.providers.vnstock_provider import VnstockDataProvider
+from pipeline.validation import validate_and_normalize_records
+
+
+class LogCaptureHandler(logging.Handler):
+    """Handler to reliably capture all log records for assertions."""
+    def __init__(self):
+        super().__init__()
+        self.records: List[logging.LogRecord] = []
+
+    def emit(self, record):
+        self.records.append(record)
 
 
 class TestProviderInterface(unittest.TestCase):
@@ -28,8 +38,12 @@ class TestProviderInterface(unittest.TestCase):
 
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
+        self.log_handler = LogCaptureHandler()
+        logging.getLogger().addHandler(self.log_handler)
+        logging.getLogger("vn_stock_signal").setLevel(logging.DEBUG)
 
     def tearDown(self):
+        logging.getLogger().removeHandler(self.log_handler)
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_polymorphic_provider_contracts(self):
@@ -98,6 +112,8 @@ class TestProviderInterface(unittest.TestCase):
         ]
 
         for token in test_tokens:
+            self.log_handler.records.clear()
+
             # 1. Test CSV Provider injection
             csv_path = os.path.join(self.test_dir, f"test_{token.replace('-', '_')}.csv")
             with open(csv_path, "w", encoding="utf-8") as f:
@@ -106,8 +122,7 @@ class TestProviderInterface(unittest.TestCase):
                 f.write(f"2026-08-21,FPT,HOSE,100,102,99,101,1000\n")
 
             csv_provider = CsvDataProvider(csv_path)
-            with self.assertLogs("vn_stock_signal", level="DEBUG") if logging.getLogger("vn_stock_signal").hasHandlers() else unittest.mock.MagicMock():
-                res_csv = csv_provider.fetch_ohlcv()
+            res_csv = csv_provider.fetch_ohlcv()
 
             for w in res_csv.warnings:
                 self.assertNotIn(token, w, f"Exact token '{token}' leaked in CSV warning: {w}")
@@ -143,16 +158,37 @@ class TestProviderInterface(unittest.TestCase):
             for w in res_vn.warnings:
                 self.assertNotIn(token, w, f"Exact token '{token}' leaked in Vnstock warning: {w}")
 
-            # 4. Build Dataset serialization check: Assert adversarial token rejected and not in JSON bytes
+            # 4. Direct pipeline validation and dataset build check:
+            # Pass 1 valid FPT record, 1 invalid record with raw token in trading_date, and 1 duplicate record
+            valid_rec = OHLCVRecord("2026-08-21", "FPT", "HOSE", 100.0, 102.0, 99.0, 101.0, volume=1000)
+            bad_rec = OHLCVRecord(token, "FPT", "HOSE", 100.0, 102.0, 99.0, 101.0, volume=1000)
+            dup_rec = OHLCVRecord("2026-08-21", "FPT", "HOSE", 100.0, 102.0, 99.0, 101.0, volume=1000)
+
+            accepted_recs, quality_info = validate_and_normalize_records(
+                [valid_rec, bad_rec, dup_rec],
+                strict_duplicates=False,
+            )
+            self.assertEqual(len(accepted_recs), 1)
+            for w in quality_info.warnings:
+                self.assertNotIn(token, w, f"Exact token '{token}' leaked in QualityInfo warnings: {w}")
+
+            # 5. Build Dataset serialization check: Assert adversarial token rejected and not in JSON bytes
             out_dataset_dir = os.path.join(self.test_dir, f"dataset_{token.replace('-', '_')}")
-            # All valid records accepted from CSV provider (FPT only, adversarial row rejected)
             build_dataset_from_records(
-                records=res_csv.records,
+                records=accepted_recs,
                 output_dir=out_dataset_dir,
                 fixed_generated_at="2026-08-21T10:00:00Z",
                 workspace_root=self.test_dir,
+                parse_warnings=quality_info.warnings,
+                parse_errors_count=quality_info.rejected_rows,
             )
 
+            # Inspect captured log messages
+            for log_rec in self.log_handler.records:
+                msg = log_rec.getMessage()
+                self.assertNotIn(token, msg, f"Exact token '{token}' leaked in captured log message: {msg}")
+
+            # Inspect all output JSON files on disk
             for root, _, files in os.walk(out_dataset_dir):
                 for fn in files:
                     full_fn = os.path.join(root, fn)

@@ -402,7 +402,7 @@ class TestDatasetManager(unittest.TestCase):
         self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
 
     def test_failure_injection_8_lkg_swap_cleanup_no_split_brain(self):
-        """8. Reproduction test: Injected failure cleaning lkg_swap post-commit must NOT cause split-brain (Target=V2, LKG=V2)."""
+        """8. Reproduction test: Injected failure cleaning lkg_swap post-commit must NOT cause split-brain (Target=V2, LKG=V2), reports warning, and recovers next run."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
         self.mgr.publish_from_staging()
@@ -414,23 +414,34 @@ class TestDatasetManager(unittest.TestCase):
         original_rmtree = shutil.rmtree
 
         def mock_rmtree(path, ignore_errors=False):
-            if path == self.mgr.lkg_swap:
+            if os.path.abspath(path) == os.path.abspath(self.mgr.lkg_swap):
                 raise OSError("Injected permission error during post-commit lkg_swap cleanup")
             return original_rmtree(path, ignore_errors=ignore_errors)
 
         with patch("shutil.rmtree", side_effect=mock_rmtree):
-            success, errors = self.mgr.publish_from_staging()
+            success, warnings = self.mgr.publish_from_staging()
             # Must succeed because commit point was already reached
             self.assertTrue(success)
+            self.assertEqual(warnings, ["Post-commit warning: temporary recovery directory cleanup incomplete"])
 
         # Assert BOTH target and LKG are on V2 (ZERO SPLIT-BRAIN)
         target_snap = self._snapshot_directory(self.target_dir)
         lkg_snap = self._snapshot_directory(self.lkg_dir)
         self.assertEqual(target_snap, lkg_snap, "Target and LKG must have identical byte snapshot on V2")
         self.assertEqual(v2_staging_snap, target_snap, "Target must be V2")
+        # Assert orphan directory exists
+        self.assertTrue(os.path.exists(self.mgr.lkg_swap))
+
+        # Subsequent transaction: Once failure condition is cleared, next publish cleans stale recovery dir and succeeds cleanly
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="3333333333333333")
+        success_v3, warnings_v3 = self.mgr.publish_from_staging()
+        self.assertTrue(success_v3)
+        self.assertEqual(warnings_v3, [])
+        self.assertFalse(os.path.exists(self.mgr.lkg_swap))
 
     def test_failure_injection_9_target_swap_cleanup_no_split_brain(self):
-        """9. Injected failure cleaning swap_dir post-commit must NOT cause split-brain (Target=V2, LKG=V2)."""
+        """9. Injected failure cleaning swap_dir post-commit must NOT cause split-brain (Target=V2, LKG=V2), reports warning, and recovers next run."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
         self.mgr.publish_from_staging()
@@ -442,18 +453,57 @@ class TestDatasetManager(unittest.TestCase):
         original_rmtree = shutil.rmtree
 
         def mock_rmtree(path, ignore_errors=False):
-            if path == self.mgr.swap_dir:
+            if os.path.abspath(path) == os.path.abspath(self.mgr.swap_dir):
                 raise OSError("Injected permission error during post-commit swap_dir cleanup")
             return original_rmtree(path, ignore_errors=ignore_errors)
 
         with patch("shutil.rmtree", side_effect=mock_rmtree):
-            success, errors = self.mgr.publish_from_staging()
+            success, warnings = self.mgr.publish_from_staging()
             self.assertTrue(success)
+            self.assertEqual(warnings, ["Post-commit warning: temporary recovery directory cleanup incomplete"])
 
         target_snap = self._snapshot_directory(self.target_dir)
         lkg_snap = self._snapshot_directory(self.lkg_dir)
         self.assertEqual(target_snap, lkg_snap)
         self.assertEqual(v2_staging_snap, target_snap)
+        self.assertTrue(os.path.exists(self.mgr.swap_dir))
+
+        # Subsequent transaction recovers
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="3333333333333333")
+        success_v3, warnings_v3 = self.mgr.publish_from_staging()
+        self.assertTrue(success_v3)
+        self.assertEqual(warnings_v3, [])
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+
+    def test_persistent_cleanup_failure_causes_fail_closed_transaction(self):
+        """Persistent failure to clean stale recovery directory aborts new transaction before modifying target."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+
+        # Create un-deletable stale recovery directory
+        os.makedirs(self.mgr.swap_dir, exist_ok=True)
+
+        original_rmtree = shutil.rmtree
+
+        def unremovable_rmtree(path, ignore_errors=False):
+            if os.path.abspath(path) == os.path.abspath(self.mgr.swap_dir):
+                pass  # Cannot delete
+            else:
+                original_rmtree(path, ignore_errors=ignore_errors)
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+
+        with patch("shutil.rmtree", side_effect=unremovable_rmtree):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+            self.assertEqual(errors, ["Persistent stale recovery directory could not be cleaned"])
+
+        # Target was never touched or corrupted
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
 
     def test_failure_injection_10_rollback_copy_failure(self):
         """10. Injected failure during LKG rollback copy restores original target."""

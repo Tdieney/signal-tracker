@@ -597,11 +597,21 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     // 2. Direct unit testing of pure predicates against unexpected negative control errors
     const fake404 = 'UNEXPECTED_ERROR: Failed to load resource 404 in manifest.json';
     expect(isManifest404AllowedConsole(fake404, 'https://example.com/other')).toBe(false);
-    expect(createInvalidSymbolAllowedConsole('FPT')(fake404, 'https://example.com/other')).toBe(false);
-    expect(isMalformedManifestAllowedConsole('UNEXPECTED: SyntaxError in other.json', 'https://example.com/other.json')).toBe(false);
-    expect(isUnsupportedSchemaAllowedConsole('UNEXPECTED: Schema error', 'https://example.com/other.json')).toBe(false);
-    expect(isMissingKeysAllowedConsole('UNEXPECTED: Missing key', 'https://example.com/other.json')).toBe(false);
-    expect(createDatasetIdMismatchAllowedConsole('/data/overview.json')('UNEXPECTED: mismatch in screener', 'https://example.com/data/screener.json')).toBe(false);
+
+    // Negative control: Invalid symbol predicate rejects crash message and wrong URL
+    const invalidSymbolFilter = createInvalidSymbolAllowedConsole('UNKNOWNXYZ');
+    expect(invalidSymbolFilter('UNEXPECTED RUNTIME CRASH: Không thể tải dữ liệu chi tiết mã UNKNOWNXYZ', 'http://localhost/data/symbols/UNKNOWNXYZ.json')).toBe(false);
+    expect(invalidSymbolFilter('Không tìm thấy dữ liệu cho mã UNKNOWNXYZ', 'http://localhost/data/symbols/OTHER.json')).toBe(false);
+
+    // Negative control: Dataset ID mismatch predicate rejects crash message and wrong URL
+    const mismatchOverviewFilter = createDatasetIdMismatchAllowedConsole('/data/overview.json');
+    expect(mismatchOverviewFilter('UNEXPECTED RUNTIME CRASH dataset_id mismatch /data/overview.json', 'http://localhost/data/overview.json')).toBe(false);
+    expect(mismatchOverviewFilter('Lỗi xác thực dataset_id cho /data/overview.json: dataset_id mismatch', 'http://localhost/data/screener.json')).toBe(false);
+
+    // Negative control: Manifest predicates reject syntax errors in unrelated payloads
+    expect(isMalformedManifestAllowedConsole('SyntaxError: Unexpected token while parsing unrelated payload', 'http://localhost/data/manifest.json')).toBe(false);
+    expect(isUnsupportedSchemaAllowedConsole('UNEXPECTED Schema validation error', 'http://localhost/data/manifest.json')).toBe(false);
+    expect(isMissingKeysAllowedConsole('UNEXPECTED Missing required keys', 'http://localhost/data/manifest.json')).toBe(false);
 
     // 3. Injected unexpected console error containing common keywords to test strict allow-list containment
     await page.evaluate(() => {

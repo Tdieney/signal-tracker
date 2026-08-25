@@ -169,6 +169,59 @@ class TestValidation(unittest.TestCase):
         self.assertNotEqual(base_id, compute_deterministic_dataset_id("2026-08-21", [base_rec], "csv", "ALL", "PASS", 1, {"input_rows": 2, "accepted_rows": 1, "rejected_rows": 1, "warnings": []}), "input_rows")
         self.assertNotEqual(base_id, compute_deterministic_dataset_id("2026-08-21", [base_rec], "csv", "ALL", "PASS", 1, {"input_rows": 1, "accepted_rows": 1, "rejected_rows": 0, "warnings": ["Sanitized warning"]}), "warnings")
 
+    def test_symbol_contract_validity_and_normalization(self):
+        """Test symbol contract: FPT, A1, VN30 valid, lowercase normalized, invalid chars rejected."""
+        valid_symbols = ["FPT", "A1", "VN30", "fpt", "a1", "vn30", "ABC12345", "VIC"]
+        for sym in valid_symbols:
+            rec = OHLCVRecord("2026-08-21", sym, "HOSE", 100.0, 105.0, 98.0, 102.5, volume=1000)
+            is_valid, errs = validate_record(rec)
+            self.assertTrue(is_valid, f"Expected symbol '{sym}' to be valid, but got: {errs}")
+
+        accepted, quality = validate_and_normalize_records([
+            OHLCVRecord("2026-08-21", "fpt", "HOSE", 100.0, 105.0, 98.0, 102.5, volume=1000),
+            OHLCVRecord("2026-08-21", "a1", "HOSE", 50.0, 52.0, 49.0, 51.0, volume=500),
+            OHLCVRecord("2026-08-21", "vn30", "HOSE", 1200.0, 1210.0, 1195.0, 1205.0, volume=2000),
+        ])
+        self.assertEqual([r.symbol for r in accepted], ["A1", "FPT", "VN30"])
+
+        invalid_symbols = ["FPT-VN", "ABC!", "@#$", "", "TOOLONGSYMBOL1234"]
+        for sym in invalid_symbols:
+            rec = OHLCVRecord("2026-08-21", sym, "HOSE", 100.0, 105.0, 98.0, 102.5, volume=1000)
+            is_valid, errs = validate_record(rec)
+            self.assertFalse(is_valid, f"Expected symbol '{sym}' to be invalid")
+
+    def test_zero_leakage_in_validation_and_errors(self):
+        """Test that validation warnings and ValidationError never contain raw symbols, dates, or record payloads."""
+        adversarial_token = "SECRET_TOKEN_ABC12345"
+        bad_rec = OHLCVRecord(
+            trading_date=adversarial_token,
+            symbol=adversarial_token,
+            exchange="INVALID_EXCHANGE",
+            open=-10.0,
+            high=100.0,
+            low=90.0,
+            close=95.0,
+            volume=-1,
+        )
+
+        accepted, quality = validate_and_normalize_records([bad_rec], strict_duplicates=False)
+        self.assertEqual(len(accepted), 0)
+        self.assertEqual(quality.rejected_rows, 1)
+        for w in quality.warnings:
+            self.assertNotIn(adversarial_token, w)
+            self.assertIn("Row 1: record failed validation checks", w)
+
+        # Duplicate rejection test
+        rec1 = OHLCVRecord("2026-08-21", "FPT", "HOSE", 100.0, 105.0, 98.0, 102.5, volume=1000)
+        rec2 = OHLCVRecord("2026-08-21", "FPT", "HOSE", 101.0, 106.0, 99.0, 103.0, volume=2000)
+        try:
+            validate_and_normalize_records([rec1, rec2], strict_duplicates=True)
+            self.fail("Expected ValidationError on duplicate record")
+        except ValidationError as ex:
+            self.assertNotIn("FPT", str(ex))
+            self.assertNotIn("2026-08-21", str(ex))
+            self.assertEqual(str(ex), "Row 2: duplicate record rejected")
+
 
 if __name__ == "__main__":
     unittest.main()

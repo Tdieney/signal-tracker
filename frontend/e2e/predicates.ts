@@ -56,50 +56,82 @@ export const createInvalidSymbolAllowedConsole = (symbol: string) => {
     if (isStandardBrowser404Console(text, locationUrl, expectedSuffix)) {
       return true;
     }
-    if (
-      text.includes(`Không tìm thấy dữ liệu cho mã ${symbol}`) ||
-      text.includes(`Không thể tải dữ liệu chi tiết mã ${symbol}`)
-    ) {
-      return true;
+    const isAnchoredAppMsg =
+      text === `Không tìm thấy dữ liệu cho mã ${symbol}` ||
+      text.startsWith(`Không thể tải dữ liệu chi tiết mã ${symbol}:`);
+    if (!isAnchoredAppMsg) {
+      return false;
     }
-    return false;
+    if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith(expectedSuffix)) {
+      return false;
+    }
+    return true;
   };
 };
 
 /**
  * Predicate for malformed manifest JSON syntax error.
  */
-export const isMalformedManifestAllowedConsole = (text: string): boolean => {
-  return /^(SyntaxError: JSON\.parse|JSON\.parse: unexpected character|SyntaxError: Unexpected token|Lỗi kết nối khi tải manifest\.json:)/.test(
-    text.trim()
-  );
+export const isMalformedManifestAllowedConsole = (text: string, locationUrl?: string): boolean => {
+  const isExactSyntaxError =
+    /^SyntaxError: (JSON\.parse: unexpected character|Unexpected token ['"<]|Unexpected identifier|JSON Parse error|Unexpected end of JSON input)/.test(text.trim()) ||
+    text.startsWith("Lỗi kết nối khi tải manifest.json:");
+  if (!isExactSyntaxError) {
+    return false;
+  }
+  if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith("/data/manifest.json")) {
+    return false;
+  }
+  return true;
 };
 
 /**
  * Predicate for unsupported manifest schema version.
  */
-export const isUnsupportedSchemaAllowedConsole = (text: string): boolean => {
-  return /^(Schema validation failed for (\/data\/)?manifest\.json:|Phiên bản dữ liệu không tương thích|Dữ liệu manifest\.json không đúng định dạng chuẩn)/.test(
-    text.trim()
-  );
+export const isUnsupportedSchemaAllowedConsole = (text: string, locationUrl?: string): boolean => {
+  const isAnchoredSchema =
+    text.startsWith("Schema validation failed for manifest.json:") ||
+    text.startsWith("Schema validation failed for /data/manifest.json:") ||
+    text === "Phiên bản dữ liệu không tương thích";
+  if (!isAnchoredSchema) {
+    return false;
+  }
+  if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith("/data/manifest.json")) {
+    return false;
+  }
+  return true;
 };
 
 /**
  * Predicate for manifest missing required keys.
  */
-export const isMissingKeysAllowedConsole = (text: string): boolean => {
-  return /^(Schema validation failed for (\/data\/)?manifest\.json:|Dữ liệu manifest\.json không đúng định dạng chuẩn)/.test(
-    text.trim()
-  );
+export const isMissingKeysAllowedConsole = (text: string, locationUrl?: string): boolean => {
+  const isAnchoredMissing =
+    text.startsWith("Schema validation failed for manifest.json:") ||
+    text.startsWith("Schema validation failed for /data/manifest.json:");
+  if (!isAnchoredMissing) {
+    return false;
+  }
+  if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith("/data/manifest.json")) {
+    return false;
+  }
+  return true;
 };
 
 /**
  * Predicate for cross-file dataset_id mismatch error on a specific resource.
  */
 export const createDatasetIdMismatchAllowedConsole = (resourceSuffix: string) => {
-  return (text: string): boolean => {
-    return text.startsWith(`Lỗi xác thực dataset_id cho ${resourceSuffix}: dataset_id mismatch`) ||
-      text.includes(`dataset_id mismatch (${resourceSuffix})`) ||
-      (text.includes('dataset_id mismatch') && text.includes(resourceSuffix));
+  return (text: string, locationUrl?: string): boolean => {
+    const isAnchoredMismatch =
+      text.startsWith(`Lỗi xác thực dataset_id cho ${resourceSuffix}: dataset_id mismatch`) ||
+      text === `dataset_id mismatch (${resourceSuffix})`;
+    if (!isAnchoredMismatch) {
+      return false;
+    }
+    if (locationUrl && locationUrl.includes('/data/') && !locationUrl.endsWith(resourceSuffix)) {
+      return false;
+    }
+    return true;
   };
 };

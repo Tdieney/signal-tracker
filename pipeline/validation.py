@@ -10,7 +10,7 @@ from typing import List, Set, Tuple
 from pipeline.models import OHLCVRecord, QualityInfo, QualityStatus
 
 
-SYMBOL_PATTERN = re.compile(r"^[A-Z]{3}$")
+SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
 VALID_EXCHANGES = {"HOSE", "HNX", "UPCOM"}
 
 
@@ -119,9 +119,13 @@ def validate_and_normalize_records(
     total_input = source_rows_count if source_rows_count is not None else (len(raw_records) + parse_errors_count)
 
     for idx, rec in enumerate(raw_records):
-        key = (rec.symbol.upper(), rec.trading_date)
+        row_num = idx + 1
+        sym_clean = rec.symbol.strip().upper() if isinstance(rec.symbol, str) else ""
+        date_clean = rec.trading_date.strip() if isinstance(rec.trading_date, str) else ""
+        key = (sym_clean, date_clean)
+
         if key in seen_keys:
-            msg = f"Duplicate record for symbol {key[0]} on date {key[1]}"
+            msg = f"Row {row_num}: duplicate record rejected"
             if strict_duplicates:
                 raise ValidationError(msg)
             else:
@@ -131,13 +135,13 @@ def validate_and_normalize_records(
 
         is_valid, errors = validate_record(rec)
         if not is_valid:
-            warnings.append(f"Rejected record for symbol {rec.symbol} on date {rec.trading_date}: {'; '.join(errors)}")
+            warnings.append(f"Row {row_num}: record failed validation checks")
             rejected_count += 1
             continue
 
         seen_keys.add(key)
         # Normalize symbol uppercase
-        rec.symbol = rec.symbol.upper()
+        rec.symbol = sym_clean
         accepted.append(rec)
 
     # Sort ascending by symbol and date
