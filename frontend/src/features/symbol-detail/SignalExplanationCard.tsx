@@ -17,42 +17,44 @@ export const SignalExplanationCard: React.FC<SignalExplanationCardProps> = ({
 }) => {
   const dateFormatted = formatDateVi(asOfDate);
   const curCloseStr = formatPrice(explanation.current_close);
-  const curMa10Str = formatPrice(explanation.current_ma10);
+  const curMA10Str = formatPrice(explanation.current_ma10);
   const prevCloseStr = formatPrice(explanation.previous_close);
-  const prevMa10Str = formatPrice(explanation.previous_ma10);
+  const prevMA10Str = formatPrice(explanation.previous_ma10);
 
-  let explanationSentence = '';
-
-  if (explanation.rule === 'CROSS_UP_MA10') {
-    explanationSentence = `${symbol} được đánh dấu “Vừa cắt lên MA10” vì Close phiên ${dateFormatted} là ${curCloseStr}, cao hơn MA10 (${curMa10Str}); ở phiên hợp lệ trước đó Close (${prevCloseStr}) không cao hơn MA10 (${prevMa10Str}).`;
-  } else if (explanation.rule === 'CROSS_DOWN_MA10') {
-    explanationSentence = `${symbol} được đánh dấu “Vừa cắt xuống MA10” vì Close phiên ${dateFormatted} là ${curCloseStr}, thấp hơn MA10 (${curMa10Str}); ở phiên hợp lệ trước đó Close (${prevCloseStr}) không thấp hơn MA10 (${prevMa10Str}).`;
-  } else if (explanation.rule === 'ABOVE_MA10') {
-    explanationSentence = `${symbol} được đánh dấu “Trên MA10” vì Close phiên ${dateFormatted} là ${curCloseStr}, cao hơn MA10 (${curMa10Str}) và duy trì vị thế từ phiên trước.`;
-  } else if (explanation.rule === 'BELOW_MA10') {
-    explanationSentence = `${symbol} được đánh dấu “Dưới MA10” vì Close phiên ${dateFormatted} là ${curCloseStr}, thấp hơn MA10 (${curMa10Str}) và duy trì vị thế từ phiên trước.`;
-  } else if (explanation.rule === 'ON_MA10') {
-    explanationSentence = `Giá đóng cửa phiên ${dateFormatted} của ${symbol} (${curCloseStr}) bằng chính xác giá trị MA10 (${curMa10Str}).`;
-  } else {
-    explanationSentence = `${symbol} chưa có tín hiệu xác nhận ở phiên ${dateFormatted} do chưa đủ lịch sử tính toán 10 phiên giao dịch hợp lệ.`;
+  let sentence = '';
+  switch (explanation.rule) {
+    case 'CROSS_UP_MA10':
+      sentence = `Tại phiên ${dateFormatted}, giá đóng cửa của ${symbol} (${curCloseStr}) đã vượt lên trên đường MA10 (${curMA10Str}), sau khi phiên liền trước (${prevCloseStr}) nằm ở mức thấp hơn hoặc bằng MA10 (${prevMA10Str}).`;
+      break;
+    case 'CROSS_DOWN_MA10':
+      sentence = `Tại phiên ${dateFormatted}, giá đóng cửa của ${symbol} (${curCloseStr}) đã cắt xuống dưới đường MA10 (${curMA10Str}), sau khi phiên liền trước (${prevCloseStr}) nằm ở mức cao hơn hoặc bằng MA10 (${prevMA10Str}).`;
+      break;
+    case 'ABOVE_MA10':
+      sentence = `Tại phiên ${dateFormatted}, giá đóng cửa của ${symbol} (${curCloseStr}) tiếp tục duy trì ở phía trên đường MA10 (${curMA10Str}).`;
+      break;
+    case 'BELOW_MA10':
+      sentence = `Tại phiên ${dateFormatted}, giá đóng cửa của ${symbol} (${curCloseStr}) tiếp tục nằm ở phía dưới đường MA10 (${curMA10Str}).`;
+      break;
+    case 'ON_MA10':
+      sentence = `Tại phiên ${dateFormatted}, giá đóng cửa của ${symbol} (${curCloseStr}) bằng chính xác giá trị đường MA10 (${curMA10Str}).`;
+      break;
+    default:
+      sentence = `Chưa đủ dữ liệu lịch sử để phân loại tín hiệu MA10 cho mã ${symbol}.`;
   }
 
   return (
-    <div
-      className="card"
-      style={{
-        backgroundColor: 'var(--color-surface)',
-        borderLeft: '4px solid var(--color-primary)',
-        padding: 'var(--space-4)',
-        marginBottom: 'var(--space-5)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-        <Info size={18} color="var(--color-primary)" aria-hidden="true" />
-        <h3 className="text-h3" style={{ fontSize: '1rem' }}>Vì sao có tín hiệu này?</h3>
+    <div className="card explanation-card">
+      <div className="explanation-header">
+        <Info size={18} className="text-muted" aria-hidden="true" />
+        <h3 className="text-h3">
+          Giải thích tín hiệu kỹ thuật
+        </h3>
       </div>
-      <p className="text-body" style={{ color: 'var(--color-text)', lineHeight: 1.6 }}>
-        {explanationSentence}
+      <p className="text-body font-semibold">
+        {sentence}
+      </p>
+      <p className="text-xs text-muted mt-2">
+        Quy tắc: So sánh giá đóng cửa với giá trị trung bình 10 phiên giao dịch gần nhất (MA10).
       </p>
     </div>
   );

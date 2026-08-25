@@ -11,23 +11,24 @@ permissions:
 
 jobs:
   validate-and-build:
+    name: Validate, Test & Build
     runs-on: ubuntu-latest
     steps:
-      # Pinned: actions/checkout@v4.2.2
+      # Pinned: actions/checkout@v7.0.1 (Node 24 runtime)
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      # Pinned: actions/setup-python@v5.4.0
+      # Pinned: actions/setup-python@v6.3.0 (Node 24 runtime)
       - name: Set up Python
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.10'
 
-      # Pinned: actions/setup-node@v4.2.0
-      - name: Set up Node.js
-        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b
+      # Pinned: actions/setup-node@v7.0.0 (Node 24 runtime)
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: 'frontend/package-lock.json'
 
@@ -37,14 +38,19 @@ jobs:
 
       - name: Build Static Dataset from CSV Fixture
         run: |
-          python pipeline/build_dataset.py --provider csv --input tests/fixtures/sample_ohlcv.csv --output frontend/public/data
+          python pipeline/build_dataset.py --provider csv --input tests/fixtures/sample_ohlcv.csv --output frontend/public/data --generated-at 2026-08-21T10:00:00Z
 
       - name: Install Frontend Dependencies
         working-directory: frontend
         run: |
           npm ci
 
-      - name: Run Frontend Tests
+      - name: Install Playwright Browsers
+        working-directory: frontend
+        run: |
+          npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run Frontend Unit Tests
         working-directory: frontend
         run: |
           npm test
@@ -54,11 +60,16 @@ jobs:
         run: |
           npm run typecheck
 
-      - name: Build Frontend Production Bundle
+      - name: Build Frontend Pages Bundle
         working-directory: frontend
         run: |
-          npm run build
+          npm run build:pages
 
       - name: Run Security and Artifact Scan
         run: |
           python scripts/security_check.py --artifact frontend/dist
+
+      - name: Run Playwright E2E and Accessibility Suite
+        working-directory: frontend
+        run: |
+          npm run test:e2e

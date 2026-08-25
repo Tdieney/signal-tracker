@@ -82,12 +82,12 @@ Không publish raw company data lên GitHub Pages. Nếu provider license không
 
 - Enforce HTTPS trong GitHub Pages settings và không tải mixed content.
 - Không dùng remote script, remote font hoặc analytics mặc định.
-- `index.html` có CSP bằng `<meta http-equiv="Content-Security-Policy">` phù hợp static app, bắt đầu từ policy tối thiểu tương đương:
+- `index.html` có CSP bằng `<meta http-equiv="Content-Security-Policy">` phù hợp static app, tuân thủ đúng policy chuẩn:
 
 ```text
 default-src 'self';
 script-src 'self';
-style-src 'self';
+style-src 'self' 'sha256-3pRED1tOXas1FXFoPb9TGCjmYe9XQsmO9OV23khV2nY=';
 img-src 'self' data:;
 font-src 'self';
 connect-src 'self';
@@ -96,25 +96,28 @@ base-uri 'self';
 form-action 'self';
 ```
 
-Chỉ nới directive khi có use case được duyệt và test. Meta CSP có giới hạn so với HTTP header; không tuyên bố nó cung cấp đầy đủ header-only protections. Không thêm `'unsafe-inline'`/`'unsafe-eval'` chỉ để chữa build nhanh.
+- Không dùng `'unsafe-inline'` hoặc `'unsafe-eval'`. Hash `'sha256-3pRED1tOXas1FXFoPb9TGCjmYe9XQsmO9OV23khV2nY='` là bắt buộc cho thẻ style tự động inject bởi thư viện `lightweight-charts@4.2.1`. Mọi wildcard `*`, duplicate directive, hoặc token lạ (như `data:` trong `connect-src`) đều bị bộ quét an ninh từ chối.
 
 - Không nhúng untrusted iframe. Nếu tương lai cần third-party content phải threat-model lại, sandbox và giới hạn origin.
 - Không dựa vào client-side code để bảo vệ dữ liệu lẽ ra phải private.
 
 Tham chiếu: [OWASP Content Security Policy Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html), [OWASP Third Party JavaScript Management](https://cheatsheetseries.owasp.org/cheatsheets/Third_Party_Javascript_Management_Cheat_Sheet.html), [GitHub Pages HTTPS](https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https).
 
-## 8. GitHub Actions hardening
+## 8. GitHub Actions và Filesystem hardening
 
-- Khai báo `permissions` tối thiểu ở workflow/job; CI thông thường chỉ `contents: read`.
-- Deploy permission chỉ nằm ở job deploy; dùng official GitHub Pages actions được pin full commit SHA.
-- Third-party action phải pin full-length commit SHA đã xác minh là upstream.
-- Tránh chạy code PR không tin cậy với `pull_request_target` và secret.
-- Không dùng untrusted issue title/branch/ref trực tiếp trong shell script.
-- Dùng concurrency để tránh race deploy; artifact phải đến từ commit/job đã test.
-- Environment protection/manual approval được khuyến nghị khi đưa provider thật vào.
-- Retention artifact/log ngắn hợp lý; không upload raw data hoặc environment dump.
-
-GitHub coi pin full SHA là cách dùng action như immutable release và khuyến nghị least privilege: [GitHub Actions secure use](https://docs.github.com/en/actions/reference/security/secure-use).
+- **GitHub Actions Node 24 runtime**:
+  - Toàn bộ các GitHub Actions chính thức được ghim (`pin`) bằng full immutable commit SHA từ upstream và chạy trên runtime Node 24:
+    - `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`
+    - `actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0`
+    - `actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0`
+    - `actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0`
+    - `actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0`
+    - `actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0`
+- **Quy trình xuất bản thư mục an toàn (Transactional Directory Replacement with Rollback)**:
+  - Dữ liệu luôn được ghi và xác thực tính toàn vẹn đầy đủ trong thư mục staging riêng biệt (`.dataset_build_<uuid>`).
+  - Đường dẫn đích được kiểm tra nghiêm ngặt chống thoát workspace (`validate_target_directory` từ chối `.`, `..`, home, filesystem roots, system dirs, symlink escape, và directory overlap).
+  - Quá trình publish vào output trực tiếp sử dụng cơ chế: backup thư mục output cũ sang `.backup_<uuid>` -> rename staging sang output -> xóa backup. Nếu xảy ra lỗi giữa chừng, hệ thống tự động rollback phục hồi nguyên vẹn backup về output ban đầu.
+  - *Lưu ý về Crash Window*: Trong trường hợp sự cố phần cứng/mất điện đột ngột ngay tại thời điểm giữa 2 bước rename, thư mục backup có thể tạm thời tồn tại và được dọn dẹp ở lần build kế tiếp.
 
 ## 9. Dependency và repository hygiene
 

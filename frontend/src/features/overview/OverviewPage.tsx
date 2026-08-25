@@ -1,17 +1,18 @@
 import React, { useEffect, useState } from 'react';
+import { ArrowUpRight, ArrowDownRight, Info } from 'lucide-react';
 import { BreadthChart } from '../../components/BreadthChart';
 import { MetricCard } from '../../components/MetricCard';
 import { SignalBadge } from '../../components/SignalBadge';
 import { Skeleton } from '../../components/Skeleton';
 import { StatusBanner } from '../../components/StatusBanner';
 import { getOverview, getScreener } from '../../lib/api';
-import { formatDateVi, formatPrice, formatDistance } from '../../lib/formatters';
+import { formatDateVi } from '../../lib/formatters';
 import { Manifest } from '../../schemas/manifestSchema';
 import { Overview } from '../../schemas/overviewSchema';
 import { ScreenerItem } from '../../schemas/screenerSchema';
 
 interface OverviewPageProps {
-  manifest: Manifest | null;
+  manifest: Manifest;
 }
 
 export const OverviewPage: React.FC<OverviewPageProps> = ({ manifest }) => {
@@ -20,320 +21,270 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ manifest }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = async () => {
+  const fetchData = async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const datasetId = manifest?.dataset_id;
       const [ovData, scData] = await Promise.all([
-        getOverview(datasetId),
-        getScreener(datasetId),
+        getOverview(manifest.dataset_id, signal),
+        getScreener(manifest.dataset_id, signal),
       ]);
       setOverview(ovData);
       setScreenerItems(scData.items);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Không thể tải dữ liệu trang Tổng quan.');
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || signal?.aborted) return;
+      setError(err?.message || 'Không thể tải dữ liệu trang tổng quan.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, [manifest?.dataset_id]);
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    return () => controller.abort();
+  }, [manifest.dataset_id]);
 
-  const crossUpItems = screenerItems.filter((it) => it.signal === 'CROSS_UP_MA10');
-  const crossDownItems = screenerItems.filter((it) => it.signal === 'CROSS_DOWN_MA10');
+  if (loading) {
+    return (
+      <div>
+        <div className="mb-5">
+          <Skeleton className="sk-title mb-2" />
+          <Skeleton className="sk-row" />
+        </div>
+        <div className="grid-kpi mb-6">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <Skeleton key={i} className="sk-kpi" />
+          ))}
+        </div>
+        <Skeleton className="sk-chart mb-6" />
+      </div>
+    );
+  }
+
+  if (error || !overview) {
+    return (
+      <StatusBanner
+        variant="error"
+        title="Lỗi tải dữ liệu tổng quan"
+        message={error || 'Không thể hiển thị dữ liệu thị trường.'}
+        onRetry={() => fetchData()}
+      />
+    );
+  }
+
+  const { metrics, breadth_history } = overview;
+  const asOfFormatted = formatDateVi(overview.as_of_date);
+
+  // Financial safety / demo truthfulness check
+  const isDemo =
+    manifest.provider === 'csv' ||
+    manifest.market_session_status === 'UNKNOWN' ||
+    manifest.freshness.status === 'UNKNOWN' ||
+    manifest.freshness.reason?.toLowerCase().includes('demo');
+
+  const sessionStatusText =
+    manifest.market_session_status === 'CLOSED_CONFIRMED'
+      ? `Đã xác nhận sau đóng cửa phiên ${asOfFormatted}`
+      : `Dữ liệu mẫu thử nghiệm (phiên ${asOfFormatted}) — Chưa xác nhận giao dịch thực tế`;
+
+  // Filter latest preview lists
+  const crossUpItems = screenerItems
+    .filter((item) => item.signal === 'CROSS_UP_MA10')
+    .slice(0, 5);
+
+  const crossDownItems = screenerItems
+    .filter((item) => item.signal === 'CROSS_DOWN_MA10')
+    .slice(0, 5);
 
   return (
     <div>
-      {/* Title & Market Session Status */}
-      <div style={{ marginBottom: 'var(--space-5)' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
-          <h1>Tổng quan thị trường</h1>
-          {manifest && (
-            <span className="text-small" style={{ color: 'var(--color-positive)', fontWeight: 600 }}>
-              • Đã xác nhận sau đóng cửa phiên {formatDateVi(manifest.as_of_date)}
-            </span>
-          )}
-        </div>
-        <p className="text-body" style={{ color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-          Đo lường độ rộng thị trường và thống kê vị thế giá đóng cửa so với đường trung bình 10 phiên (MA10).
-        </p>
-      </div>
-
-      {error && (
+      {/* Demo Banner */}
+      {isDemo && (
         <StatusBanner
-          variant="error"
-          title="Lỗi tải dữ liệu Tổng quan"
-          message={error}
-          onRetry={fetchData}
+          variant="info"
+          title="Chế độ dữ liệu mẫu (Demo / Test Mode)"
+          message="Dashboard đang hiển thị dữ liệu mô phỏng từ fixture CSV để kiểm thử giao diện và công thức kỹ thuật. Dữ liệu không phản ánh giao dịch trực tiếp ngoài thị trường."
         />
       )}
 
+      {/* Page Header */}
+      <div className="mb-5">
+        <div className="flex flex-wrap items-baseline gap-2 mb-1">
+          <h1 className="text-h1">Tổng quan độ rộng thị trường</h1>
+          <span className="text-small font-semibold text-muted">
+            • {sessionStatusText}
+          </span>
+        </div>
+        <p className="text-small text-muted">
+          Theo dõi tỷ lệ cổ phiếu nằm trên hoặc dưới đường trung bình MA10 và các tín hiệu giao cắt mới nhất.
+        </p>
+      </div>
+
       {/* KPI Cards Grid */}
-      <section aria-labelledby="kpi-heading" style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 id="kpi-heading" className="sr-only" style={{ display: 'none' }}>
-          Chỉ số thị trường chính
-        </h2>
+      <div className="grid-kpi mb-6">
+        <MetricCard
+          label="Tổng mã hợp lệ"
+          value={metrics.eligible_count}
+          contextText="Đủ dữ liệu giá & MA10"
+          linkHref="#/screener"
+          iconType="total"
+        />
 
-        {loading ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: 'var(--space-4)',
-            }}
-          >
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="card" style={{ height: '110px' }}>
-                <Skeleton width="60%" height="1rem" style={{ marginBottom: 'var(--space-3)' }} />
-                <Skeleton width="40%" height="2rem" />
-              </div>
-            ))}
-          </div>
-        ) : overview ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: 'var(--space-4)',
-            }}
-          >
-            <MetricCard
-              label="Mã đủ dữ liệu MA10"
-              value={overview.metrics.eligible_count}
-              iconType="total"
-              contextText="Cổ phiếu có tối thiểu 10 phiên giao dịch hợp lệ"
-              linkHref="#/screener?universe=ALL"
-            />
-            <MetricCard
-              label="Trên MA10"
-              value={overview.metrics.above_count}
-              percentage={overview.metrics.above_pct}
-              tone="positive"
-              iconType="above"
-              contextText="Giá đóng cửa lớn hơn MA10"
-              linkHref="#/screener?signal=ABOVE_MA10"
-            />
-            <MetricCard
-              label="Dưới MA10"
-              value={overview.metrics.below_count}
-              percentage={overview.metrics.below_pct}
-              tone="negative"
-              iconType="below"
-              contextText="Giá đóng cửa nhỏ hơn MA10"
-              linkHref="#/screener?signal=BELOW_MA10"
-            />
-            <MetricCard
-              label="Vừa cắt lên MA10"
-              value={overview.metrics.cross_up_count}
-              tone="positive"
-              iconType="cross_up"
-              contextText="Hôm nay trên MA10, phiên trước không ở trên"
-              linkHref="#/screener?signal=CROSS_UP_MA10"
-            />
-            <MetricCard
-              label="Vừa cắt xuống MA10"
-              value={overview.metrics.cross_down_count}
-              tone="negative"
-              iconType="cross_down"
-              contextText="Hôm nay dưới MA10, phiên trước không ở dưới"
-              linkHref="#/screener?signal=CROSS_DOWN_MA10"
-            />
-          </div>
-        ) : null}
-      </section>
+        <MetricCard
+          label="Trên MA10"
+          value={metrics.above_count}
+          percentage={metrics.above_pct}
+          contextText="Duy trì xu hướng ngắn hạn"
+          tone="positive"
+          linkHref="#/screener?signal=ABOVE_MA10"
+          iconType="above"
+        />
 
-      {/* Breadth Chart */}
-      <section style={{ marginBottom: 'var(--space-6)' }}>
-        {loading ? (
-          <div className="card" style={{ height: '300px' }}>
-            <Skeleton width="40%" height="1.5rem" style={{ marginBottom: 'var(--space-4)' }} />
-            <Skeleton width="100%" height="200px" />
-          </div>
-        ) : overview ? (
-          <BreadthChart history={overview.breadth_history} />
-        ) : null}
-      </section>
+        <MetricCard
+          label="Dưới MA10"
+          value={metrics.below_count}
+          percentage={metrics.below_pct}
+          contextText="Dưới đường trung bình ngắn hạn"
+          tone="default"
+          linkHref="#/screener?signal=BELOW_MA10"
+          iconType="below"
+        />
 
-      {/* Cross Up / Cross Down Previews */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))',
-          gap: 'var(--space-5)',
-          marginBottom: 'var(--space-6)',
-        }}
-      >
+        <MetricCard
+          label="Vừa vượt MA10"
+          value={metrics.cross_up_count}
+          contextText="Cross Up trong phiên"
+          tone="positive"
+          linkHref="#/screener?signal=CROSS_UP_MA10"
+          iconType="cross_up"
+        />
+
+        <MetricCard
+          label="Vừa cắt xuống MA10"
+          value={metrics.cross_down_count}
+          contextText="Cross Down trong phiên"
+          tone="negative"
+          linkHref="#/screener?signal=CROSS_DOWN_MA10"
+          iconType="cross_down"
+        />
+      </div>
+
+      {/* Market Breadth 60-session Chart */}
+      <div className="mb-6">
+        <BreadthChart history={breadth_history} />
+      </div>
+
+      {/* Cross Up / Down Preview Grid */}
+      <div className="grid-previews">
         {/* Cross Up Preview */}
-        <div className="card" style={{ padding: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-            <h3 className="text-h3" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <span>Vừa cắt lên MA10</span>
-              <span
-                style={{
-                  backgroundColor: 'var(--color-positive-bg)',
-                  color: 'var(--color-positive)',
-                  fontSize: '0.75rem',
-                  padding: '2px 8px',
-                  borderRadius: 'var(--radius-full)',
-                  fontWeight: 600,
-                }}
-              >
-                {crossUpItems.length}
-              </span>
-            </h3>
-            <a href="#/screener?signal=CROSS_UP_MA10" className="text-small" style={{ fontWeight: 600 }}>
-              Xem tất cả →
-            </a>
+        <div className="card preview-card">
+          <div className="preview-header">
+            <div className="flex items-center gap-2">
+              <ArrowUpRight size={18} className="text-positive" aria-hidden="true" />
+              <h3 className="text-h3">Mã vừa vượt MA10</h3>
+            </div>
+            <span className="preview-badge preview-badge-positive">
+              {metrics.cross_up_count} mã
+            </span>
           </div>
 
-          {crossUpItems.length === 0 ? (
-            <p className="text-small" style={{ color: 'var(--color-text-muted)', padding: 'var(--space-3) 0' }}>
-              Không có mã nào vừa cắt lên MA10 trong phiên này.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {crossUpItems.slice(0, 5).map((item) => (
-                <div
-                  key={item.symbol}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 'var(--space-2) var(--space-3)',
-                    backgroundColor: 'var(--color-surface-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--color-border-subtle)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                    <a
-                      href={`#/symbols/${item.symbol}`}
-                      style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--color-primary)' }}
-                    >
+          {crossUpItems.length > 0 ? (
+            <div className="flex flex-col gap-2 mb-4">
+              {crossUpItems.map((item) => (
+                <div key={item.symbol} className="preview-item-row">
+                  <div className="flex items-center gap-2">
+                    <a href={`#/symbols/${item.symbol}`} className="preview-symbol-link">
                       {item.symbol}
                     </a>
-                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                      {item.exchange}
-                    </span>
+                    <span className="text-xs text-muted">{item.exchange}</span>
+                    {item.in_vn30 && <span className="badge-vn30">VN30</span>}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{formatPrice(item.close)}</span>
-                    <span style={{ color: 'var(--color-positive)', fontSize: '0.875rem', fontWeight: 600 }}>
-                      {formatDistance(item.distance_pct)}
-                    </span>
-                    <SignalBadge signal={item.signal} compact />
-                  </div>
+                  <SignalBadge signal={item.signal} compact />
                 </div>
               ))}
             </div>
+          ) : (
+            <div className="text-small text-muted mb-4">
+              Không có mã nào vừa vượt lên MA10 trong phiên này.
+            </div>
           )}
+
+          <a href="#/screener?signal=CROSS_UP_MA10" className="text-small font-semibold flex items-center gap-1">
+            <span>Xem tất cả mã Cross Up trong bộ lọc</span>
+            <ArrowUpRight size={14} aria-hidden="true" />
+          </a>
         </div>
 
         {/* Cross Down Preview */}
-        <div className="card" style={{ padding: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-            <h3 className="text-h3" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <span>Vừa cắt xuống MA10</span>
-              <span
-                style={{
-                  backgroundColor: 'var(--color-negative-bg)',
-                  color: 'var(--color-negative)',
-                  fontSize: '0.75rem',
-                  padding: '2px 8px',
-                  borderRadius: 'var(--radius-full)',
-                  fontWeight: 600,
-                }}
-              >
-                {crossDownItems.length}
-              </span>
-            </h3>
-            <a href="#/screener?signal=CROSS_DOWN_MA10" className="text-small" style={{ fontWeight: 600 }}>
-              Xem tất cả →
-            </a>
+        <div className="card preview-card">
+          <div className="preview-header">
+            <div className="flex items-center gap-2">
+              <ArrowDownRight size={18} className="text-negative" aria-hidden="true" />
+              <h3 className="text-h3">Mã vừa cắt xuống MA10</h3>
+            </div>
+            <span className="preview-badge preview-badge-negative">
+              {metrics.cross_down_count} mã
+            </span>
           </div>
 
-          {crossDownItems.length === 0 ? (
-            <p className="text-small" style={{ color: 'var(--color-text-muted)', padding: 'var(--space-3) 0' }}>
-              Không có mã nào vừa cắt xuống MA10 trong phiên này.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {crossDownItems.slice(0, 5).map((item) => (
-                <div
-                  key={item.symbol}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 'var(--space-2) var(--space-3)',
-                    backgroundColor: 'var(--color-surface-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--color-border-subtle)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                    <a
-                      href={`#/symbols/${item.symbol}`}
-                      style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--color-primary)' }}
-                    >
+          {crossDownItems.length > 0 ? (
+            <div className="flex flex-col gap-2 mb-4">
+              {crossDownItems.map((item) => (
+                <div key={item.symbol} className="preview-item-row">
+                  <div className="flex items-center gap-2">
+                    <a href={`#/symbols/${item.symbol}`} className="preview-symbol-link">
                       {item.symbol}
                     </a>
-                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                      {item.exchange}
-                    </span>
+                    <span className="text-xs text-muted">{item.exchange}</span>
+                    {item.in_vn30 && <span className="badge-vn30">VN30</span>}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{formatPrice(item.close)}</span>
-                    <span style={{ color: 'var(--color-negative)', fontSize: '0.875rem', fontWeight: 600 }}>
-                      {formatDistance(item.distance_pct)}
-                    </span>
-                    <SignalBadge signal={item.signal} compact />
-                  </div>
+                  <SignalBadge signal={item.signal} compact />
                 </div>
               ))}
             </div>
+          ) : (
+            <div className="text-small text-muted mb-4">
+              Không có mã nào vừa cắt xuống MA10 trong phiên này.
+            </div>
           )}
+
+          <a href="#/screener?signal=CROSS_DOWN_MA10" className="text-small font-semibold flex items-center gap-1">
+            <span>Xem tất cả mã Cross Down trong bộ lọc</span>
+            <ArrowDownRight size={14} aria-hidden="true" />
+          </a>
         </div>
       </div>
 
-      {/* Data Quality Summary */}
-      {manifest && (
-        <section className="card" style={{ padding: 'var(--space-4)' }}>
-          <h3 className="text-h3" style={{ marginBottom: 'var(--space-2)' }}>
-            Chất lượng dữ liệu dataset
-          </h3>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 'var(--space-3)',
-              marginTop: 'var(--space-3)',
-            }}
-          >
-            <div>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Trạng thái kiểm tra</span>
-              <div style={{ fontWeight: 600, color: manifest.quality.status === 'PASS' ? 'var(--color-positive)' : 'var(--color-warning)' }}>
-                {manifest.quality.status === 'PASS' ? 'Đạt chuẩn (PASS)' : 'Cảnh báo (PARTIAL)'}
-              </div>
-            </div>
-            <div>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Số dòng dữ liệu nạp</span>
-              <div style={{ fontWeight: 600 }}>{manifest.quality.input_rows.toLocaleString('vi-VN')} dòng</div>
-            </div>
-            <div>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Số dòng hợp lệ</span>
-              <div style={{ fontWeight: 600 }}>{manifest.quality.accepted_rows.toLocaleString('vi-VN')} dòng</div>
-            </div>
-            <div>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Số mã theo dõi</span>
-              <div style={{ fontWeight: 600 }}>{manifest.quality.eligible_symbols} mã</div>
-            </div>
+      {/* Data Quality Card */}
+      <div className="card">
+        <div className="flex items-center gap-2 mb-2">
+          <Info size={18} className="text-muted" aria-hidden="true" />
+          <h3 className="text-h3">Chất lượng dữ liệu phiên</h3>
+        </div>
+        <p className="text-small text-muted mb-3">
+          Tất cả bản ghi dữ liệu được kiểm tra hợp lệ trước khi phân loại tín hiệu và tính toán độ rộng.
+        </p>
+
+        <div className="grid-quality">
+          <div className="card bg-surface-subtle">
+            <span className="text-xs text-muted block mb-1">Dòng dữ liệu nạp:</span>
+            <strong className="text-body font-bold">{manifest.quality.input_rows}</strong>
           </div>
-        </section>
-      )}
+          <div className="card bg-surface-subtle">
+            <span className="text-xs text-muted block mb-1">Dòng hợp lệ:</span>
+            <strong className="text-body font-bold text-positive">{manifest.quality.accepted_rows}</strong>
+          </div>
+          <div className="card bg-surface-subtle">
+            <span className="text-xs text-muted block mb-1">Dòng loại bỏ:</span>
+            <strong className="text-body font-bold text-negative">{manifest.quality.rejected_rows}</strong>
+          </div>
+          <div className="card bg-surface-subtle">
+            <span className="text-xs text-muted block mb-1">Số mã đủ điều kiện:</span>
+            <strong className="text-body font-bold">{manifest.quality.eligible_symbols}</strong>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

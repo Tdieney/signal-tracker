@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { OverviewPage } from '../features/overview/OverviewPage';
 import { ScreenerPage } from '../features/screener/ScreenerPage';
 import { SymbolDetailPage } from '../features/symbol-detail/SymbolDetailPage';
-import { getManifest } from '../lib/api';
+import { Skeleton } from '../components/Skeleton';
+import { StatusBanner } from '../components/StatusBanner';
+import { getManifest, clearApiCache } from '../lib/api';
 import { Manifest } from '../schemas/manifestSchema';
 import { AppShell } from './AppShell';
 import { parseHashRoute, RouteType } from './routes';
@@ -12,26 +14,30 @@ export const App: React.FC = () => {
     parseHashRoute(window.location.hash)
   );
   const [manifest, setManifest] = useState<Manifest | null>(null);
-  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [manifestLoading, setManifestLoading] = useState(true);
+  const [manifestError, setManifestError] = useState<string | null>(null);
 
-  // Load manifest at root startup
-  const loadManifest = async () => {
-    setGlobalError(null);
+  // Load manifest at root startup with fail-closed guarantee
+  const loadManifest = useCallback(async () => {
+    setManifestLoading(true);
+    setManifestError(null);
+    clearApiCache();
     try {
       const data = await getManifest();
       setManifest(data);
-    } catch (err: unknown) {
-      setGlobalError(
-        err instanceof Error
-          ? err.message
-          : 'Không thể kết nối đến nguồn dữ liệu Manifest. Vui lòng thử lại.'
+    } catch (err: any) {
+      setManifest(null);
+      setManifestError(
+        err?.message || 'Không thể tải tệp thông tin Manifest của thị trường. Không thể hiển thị tín hiệu.'
       );
+    } finally {
+      setManifestLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadManifest();
-  }, []);
+  }, [loadManifest]);
 
   // Listen to hash route changes
   useEffect(() => {
@@ -65,72 +71,74 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Get current active route path string for navigation tab highlight
-  const currentPath =
-    currentRoute.name === 'overview'
-      ? '/'
-      : currentRoute.name === 'screener'
-      ? '/screener'
-      : currentRoute.name === 'symbol'
-      ? `/symbols/${currentRoute.symbol}`
-      : '/404';
+  // Get current active route name for navigation tab highlight
+  const currentTab = currentRoute.name === 'screener' ? 'screener' : 'overview';
 
   return (
     <AppShell
-      currentRoute={currentPath}
+      currentRoute={currentTab}
       manifest={manifest}
-      globalError={globalError}
-      onRetry={loadManifest}
     >
-      {currentRoute.name === 'overview' && <OverviewPage manifest={manifest} />}
-      {currentRoute.name === 'screener' && (
-        <ScreenerPage manifest={manifest} searchQueryString={currentRoute.search} />
-      )}
-      {currentRoute.name === 'symbol' && (
-        <SymbolDetailPage symbol={currentRoute.symbol} manifest={manifest} />
-      )}
-      {currentRoute.name === 'not_found' && (
-        <div className="card" style={{ padding: 'var(--space-7)', textAlign: 'center' }}>
-          <h1 className="text-h1" style={{ marginBottom: 'var(--space-2)' }}>
-            404 — Không tìm thấy trang
-          </h1>
-          <p className="text-body" style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)' }}>
-            Đường dẫn <code>{currentRoute.path}</code> không tồn tại.
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-3)' }}>
-            <a
-              href="#/"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: 'var(--space-2) var(--space-4)',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--color-primary)',
-                color: '#ffffff',
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Về Trang chủ Tổng quan
-            </a>
-            <a
-              href="#/screener"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: 'var(--space-2) var(--space-4)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--color-border)',
-                backgroundColor: 'var(--color-surface)',
-                color: 'var(--color-text)',
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Xem Bộ lọc cổ phiếu
-            </a>
+      {/* 1. Manifest Loading State */}
+      {manifestLoading && (
+        <div data-testid="manifest-loading">
+          <Skeleton className="sk-title mb-3" />
+          <Skeleton className="sk-row mb-4" />
+          <div className="grid-kpi mb-6">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="sk-kpi" />
+            ))}
           </div>
         </div>
+      )}
+
+      {/* 2. Manifest Fail-Closed Error State */}
+      {!manifestLoading && manifestError && (
+        <div data-testid="manifest-error" className="card p-6">
+          <StatusBanner
+            variant="error"
+            title="Lỗi xác thực dữ liệu Manifest (Fail-Closed Mode)"
+            message={`${manifestError} Vì lý do an toàn tài chính, toàn bộ bảng tín hiệu và bộ lọc bị tạm khóa cho đến khi dữ liệu được xác thực.`}
+            onRetry={loadManifest}
+          />
+        </div>
+      )}
+
+      {/* 3. Valid Manifest Loaded: Render Safe Child Views */}
+      {!manifestLoading && !manifestError && manifest && (
+        <>
+          {currentRoute.name === 'overview' && <OverviewPage manifest={manifest} />}
+          {currentRoute.name === 'screener' && (
+            <ScreenerPage initialSearch={currentRoute.search} manifest={manifest} />
+          )}
+          {currentRoute.name === 'symbol' && (
+            <SymbolDetailPage symbol={currentRoute.symbol} manifest={manifest} />
+          )}
+          {currentRoute.name === 'not_found' && (
+            <div className="card text-center p-6" data-testid="not-found-card">
+              <h1 className="text-h1 mb-2">
+                404 — Không tìm thấy trang
+              </h1>
+              <p className="text-body text-muted mb-4">
+                Đường dẫn <code>{currentRoute.path}</code> không tồn tại hoặc đã được di chuyển.
+              </p>
+              <div className="flex justify-center gap-3">
+                <a
+                  href="#/"
+                  className="btn-primary"
+                >
+                  Về Trang chủ Tổng quan
+                </a>
+                <a
+                  href="#/screener"
+                  className="btn-secondary"
+                >
+                  Xem Bộ lọc cổ phiếu
+                </a>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </AppShell>
   );

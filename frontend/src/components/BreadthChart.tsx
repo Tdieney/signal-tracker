@@ -1,214 +1,207 @@
 import React, { useState } from 'react';
+import { Table, BarChart2 } from 'lucide-react';
+import { formatDateVi } from '../lib/formatters';
 import { BreadthHistoryPoint } from '../schemas/overviewSchema';
-import { formatDateVi, formatPercent } from '../lib/formatters';
 
 interface BreadthChartProps {
   history: BreadthHistoryPoint[];
 }
 
 export const BreadthChart: React.FC<BreadthChartProps> = ({ history }) => {
-  const [showTableAlt, setShowTableAlt] = useState(false);
+  const [showTable, setShowTable] = useState(false);
 
   if (!history || history.length === 0) {
     return (
-      <div className="card" style={{ padding: 'var(--space-5)', textAlign: 'center' }}>
-        <p className="text-small" style={{ color: 'var(--color-text-muted)' }}>
-          Chưa có dữ liệu lịch sử độ rộng thị trường.
-        </p>
+      <div className="card chart-panel text-center text-muted">
+        Chưa có dữ liệu lịch sử độ rộng thị trường.
       </div>
     );
   }
 
-  // Find max and min for SVG scaling
-  const validPoints = history.filter((pt) => pt.above_pct !== null && pt.above_pct !== undefined);
-  const width = 800;
+  // SVG Chart Dimensions
   const height = 220;
-  const padding = { top: 20, right: 30, bottom: 30, left: 40 };
+  const width = 800;
+  const paddingLeft = 45;
+  const paddingRight = 20;
+  const paddingTop = 20;
+  const paddingBottom = 30;
 
-  const chartW = width - padding.left - padding.right;
-  const chartH = height - padding.top - padding.bottom;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
 
-  // Build SVG path
-  const points = validPoints.map((pt, i) => {
-    const x = padding.left + (i / Math.max(validPoints.length - 1, 1)) * chartW;
-    const y = padding.top + chartH - ((pt.above_pct ?? 0) / 100) * chartH;
-    return { x, y, pt };
-  });
+  const points = history.slice(-60); // Maximum 60 sessions
+  const n = points.length;
+  const xStep = n > 1 ? chartWidth / (n - 1) : 0;
 
-  const pathD = points.reduce((acc, p, i) => {
-    return i === 0 ? `M ${p.x} ${p.y}` : `${acc} L ${p.x} ${p.y}`;
-  }, '');
+  const svgPoints = points
+    .map((p, idx) => {
+      const pct = p.above_pct ?? 0;
+      const x = paddingLeft + idx * xStep;
+      const y = paddingTop + (1 - pct / 100) * chartHeight;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
 
-  const areaD = points.length > 0
-    ? `${pathD} L ${points[points.length - 1].x} ${padding.top + chartH} L ${points[0].x} ${padding.top + chartH} Z`
-    : '';
+  const areaPath =
+    points.length > 1
+      ? `M ${paddingLeft},${paddingTop + chartHeight} L ${svgPoints.split(' ')[0]} ${points
+          .map((p, idx) => {
+            const pct = p.above_pct ?? 0;
+            const x = paddingLeft + idx * xStep;
+            const y = paddingTop + (1 - pct / 100) * chartHeight;
+            return `L ${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(' ')} L ${(paddingLeft + (n - 1) * xStep).toFixed(1)},${paddingTop + chartHeight} Z`
+      : '';
 
   return (
-    <div className="card" style={{ padding: 'var(--space-4)' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 'var(--space-2)',
-          marginBottom: 'var(--space-3)',
-        }}
-      >
+    <div className="card chart-panel">
+      <div className="chart-header">
         <div>
-          <h2 className="text-h2">Độ rộng thị trường MA10 ({validPoints.length} phiên)</h2>
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>
-            Tỷ lệ cổ phiếu có giá đóng cửa trên MA10 theo thời gian
-          </p>
+          <h2 className="text-h2">
+            Tỷ lệ cổ phiếu trên MA10 (60 phiên gần nhất)
+          </h2>
+          <span className="text-small">
+            Đường đo lường sức mạnh lan tỏa của thị trường (% mã Close &gt; MA10 trên tổng số mã đủ điều kiện)
+          </span>
         </div>
+
         <button
           type="button"
-          onClick={() => setShowTableAlt(!showTableAlt)}
-          style={{
-            background: 'none',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-sm)',
-            padding: 'var(--space-1) var(--space-3)',
-            fontSize: '0.8125rem',
-            color: 'var(--color-primary)',
-            cursor: 'pointer',
-          }}
-          aria-expanded={showTableAlt}
+          onClick={() => setShowTable(!showTable)}
+          className="chart-toggle-btn"
+          aria-expanded={showTable}
+          aria-label={showTable ? 'Chuyển sang xem biểu đồ' : 'Chuyển sang xem bảng dữ liệu'}
         >
-          {showTableAlt ? 'Ẩn bảng số liệu' : 'Xem bảng số liệu chi tiết'}
+          {showTable ? (
+            <span className="flex items-center gap-1">
+              <BarChart2 size={14} aria-hidden="true" />
+              <span>Xem biểu đồ</span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <Table size={14} aria-hidden="true" />
+              <span>Xem dạng bảng</span>
+            </span>
+          )}
         </button>
       </div>
 
-      {/* Responsive SVG Chart */}
-      <div
-        className="scrollable-region"
-        style={{ position: 'relative', width: '100%', minHeight: '220px' }}
-        tabIndex={0}
-        role="region"
-        aria-label="Biểu đồ tỷ lệ cổ phiếu trên MA10 theo các phiên gần nhất"
-      >
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
+      {!showTable ? (
+        <div
+          className="chart-container-svg"
           role="img"
-          aria-hidden="true"
+          aria-label="Biểu đồ độ rộng thị trường thể hiện tỷ lệ phần trăm cổ phiếu nằm trên đường MA10 trong 60 phiên gần nhất"
         >
-          {/* Background grid lines */}
-          <line
-            x1={padding.left}
-            y1={padding.top}
-            x2={width - padding.right}
-            y2={padding.top}
-            stroke="var(--color-border-subtle)"
-            strokeDasharray="4 4"
-          />
-          <text x={padding.left - 8} y={padding.top + 4} textAnchor="end" fontSize="11" fill="var(--color-text-muted)">
-            100%
-          </text>
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            width="100%"
+            height="100%"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="breadthAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#2457d6" stopOpacity="0.35" />
+                <stop offset="100%" stopColor="#2457d6" stopOpacity="0.0" />
+              </linearGradient>
+            </defs>
 
-          <line
-            x1={padding.left}
-            y1={padding.top + chartH * 0.5}
-            x2={width - padding.right}
-            y2={padding.top + chartH * 0.5}
-            stroke="var(--color-border-subtle)"
-            strokeDasharray="4 4"
-          />
-          <text x={padding.left - 8} y={padding.top + chartH * 0.5 + 4} textAnchor="end" fontSize="11" fill="var(--color-text-muted)">
-            50%
-          </text>
+            {/* Grid horizontal lines */}
+            {[0, 25, 50, 75, 100].map((level) => {
+              const y = paddingTop + (1 - level / 100) * chartHeight;
+              return (
+                <g key={level}>
+                  <line
+                    x1={paddingLeft}
+                    y1={y}
+                    x2={width - paddingRight}
+                    y2={y}
+                    stroke="var(--color-border-subtle)"
+                    strokeDasharray={level === 50 ? '4,4' : undefined}
+                    strokeWidth={level === 50 ? '1.5' : '1'}
+                  />
+                  <text
+                    x={paddingLeft - 8}
+                    y={y + 4}
+                    textAnchor="end"
+                    fontSize="11"
+                    fill="var(--color-text-subtle)"
+                    fontFamily="inherit"
+                  >
+                    {level}%
+                  </text>
+                </g>
+              );
+            })}
 
-          <line
-            x1={padding.left}
-            y1={padding.top + chartH}
-            x2={width - padding.right}
-            y2={padding.top + chartH}
-            stroke="var(--color-border)"
-          />
-          <text x={padding.left - 8} y={padding.top + chartH + 4} textAnchor="end" fontSize="11" fill="var(--color-text-muted)">
-            0%
-          </text>
+            {/* Area Fill */}
+            {areaPath && <path d={areaPath} fill="url(#breadthAreaGradient)" />}
 
-          {/* Area fill */}
-          {areaD && <path d={areaD} fill="rgba(36, 87, 214, 0.08)" />}
-
-          {/* Line */}
-          {pathD && (
-            <path
-              d={pathD}
+            {/* Line Plot */}
+            <polyline
               fill="none"
               stroke="var(--color-primary)"
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
+              points={svgPoints}
             />
-          )}
 
-          {/* Points */}
-          {points.map((p, i) => (
-            <g key={i}>
-              <circle
-                cx={p.x}
-                cy={p.y}
-                r="4"
-                fill="var(--color-surface)"
-                stroke="var(--color-primary)"
-                strokeWidth="2"
-              />
-            </g>
-          ))}
-
-          {/* X axis dates */}
-          {points.length > 0 && (
-            <>
-              <text x={points[0].x} y={height - 8} textAnchor="start" fontSize="11" fill="var(--color-text-muted)">
-                {formatDateVi(points[0].pt.trading_date)}
-              </text>
-              <text
-                x={points[points.length - 1].x}
-                y={height - 8}
-                textAnchor="end"
-                fontSize="11"
-                fill="var(--color-text-muted)"
-              >
-                {formatDateVi(points[points.length - 1].pt.trading_date)}
-              </text>
-            </>
-          )}
-        </svg>
-      </div>
-
-      {/* Accessible Table Alternative */}
-      {showTableAlt && (
-        <div style={{ marginTop: 'var(--space-4)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-3)' }}>
-          <div className="scrollable-region" style={{ maxHeight: '240px' }} tabIndex={0}>
-            <table
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '0.875rem',
-                textAlign: 'left',
-              }}
-            >
-              <caption className="text-small" style={{ textAlign: 'left', paddingBottom: 'var(--space-2)', fontWeight: 600 }}>
-                Bảng dữ liệu lịch sử độ rộng MA10
-              </caption>
+            {/* First and Last Date Labels */}
+            {points.length > 0 && (
+              <>
+                <text
+                  x={paddingLeft}
+                  y={height - 8}
+                  textAnchor="start"
+                  fontSize="11"
+                  fill="var(--color-text-subtle)"
+                  fontFamily="inherit"
+                >
+                  {formatDateVi(points[0].trading_date)}
+                </text>
+                <text
+                  x={width - paddingRight}
+                  y={height - 8}
+                  textAnchor="end"
+                  fontSize="11"
+                  fill="var(--color-text-subtle)"
+                  fontFamily="inherit"
+                >
+                  {formatDateVi(points[points.length - 1].trading_date)}
+                </text>
+              </>
+            )}
+          </svg>
+        </div>
+      ) : (
+        <div
+          className="chart-table-alt-wrapper"
+          tabIndex={0}
+          role="region"
+          aria-label="Bảng dữ liệu tỷ lệ cổ phiếu trên MA10 theo phiên"
+        >
+          <div className="scrollable-region chart-table-scroll">
+            <table className="data-table">
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-muted)' }}>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)' }}>Phiên</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)' }}>Số mã đủ dữ liệu</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)' }}>Số mã trên MA10</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)' }}>Tỷ lệ trên MA10</th>
+                <tr className="data-table-header-row">
+                  <th className="data-table-th">Ngày giao dịch</th>
+                  <th className="data-table-th data-table-th-right">Mã trên MA10</th>
+                  <th className="data-table-th data-table-th-right">Tổng mã đủ điều kiện</th>
+                  <th className="data-table-th data-table-th-right">Tỷ lệ (%)</th>
                 </tr>
               </thead>
               <tbody>
-                {[...validPoints].reverse().map((pt) => (
-                  <tr key={pt.trading_date} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)' }}>{formatDateVi(pt.trading_date)}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)' }}>{pt.eligible_count}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)' }}>{pt.above_count}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)', fontWeight: 600 }}>
-                      {formatPercent(pt.above_pct)}
+                {points.slice().reverse().map((p, idx) => (
+                  <tr
+                    key={p.trading_date}
+                    className={`data-table-row ${idx % 2 !== 0 ? 'data-table-row-alt' : ''}`}
+                  >
+                    <td className="data-table-td font-semibold">{formatDateVi(p.trading_date)}</td>
+                    <td className="data-table-td-right text-positive">{p.above_count}</td>
+                    <td className="data-table-td-right">{p.eligible_count}</td>
+                    <td className="data-table-td-right font-bold">
+                      {p.above_pct !== null && p.above_pct !== undefined ? `${p.above_pct}%` : '—'}
                     </td>
                   </tr>
                 ))}

@@ -16,7 +16,7 @@ def run_step(cmd: list[str], description: str) -> None:
 
 
 def main() -> None:
-    # 1. Build dataset JSON files from CSV fixture
+    # 1. Build dataset JSON files from CSV fixture with fixed deterministic generated-at
     run_step(
         [
             sys.executable,
@@ -27,6 +27,8 @@ def main() -> None:
             "tests/fixtures/sample_ohlcv.csv",
             "--output",
             "frontend/public/data",
+            "--generated-at",
+            "2026-08-21T10:00:00Z",
         ],
         "Build static JSON dataset from CSV fixture",
     )
@@ -39,9 +41,9 @@ def main() -> None:
 
     # 3. Run frontend tests and production build
     npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
-    run_step([npm_cmd, "--prefix", "frontend", "test"], "Run frontend Vitest suite")
+    run_step([npm_cmd, "--prefix", "frontend", "test", "--", "--run"], "Run frontend Vitest suite")
     run_step([npm_cmd, "--prefix", "frontend", "run", "typecheck"], "Run frontend TypeScript typecheck")
-    run_step([npm_cmd, "--prefix", "frontend", "run", "build"], "Build frontend static production bundle")
+    run_step([npm_cmd, "--prefix", "frontend", "run", "build:pages"], "Build frontend static production bundle with base path")
 
     # 4. Run Security and Artifact Scan
     run_step(
@@ -49,7 +51,13 @@ def main() -> None:
         "Run security scan and artifact allow-list check",
     )
 
-    print("\n=== SUCCESS: All pipeline, test, frontend build, and security checks passed! ===")
+    # 5. Run Playwright E2E and Accessibility Suite
+    run_step(
+        [npm_cmd, "--prefix", "frontend", "run", "test:e2e"],
+        "Run Playwright E2E and Axe accessibility suite across viewports",
+    )
+
+    print("\n=== SUCCESS: All pipeline, test, frontend build, security, and E2E checks passed! ===")
 
 
 if __name__ == "__main__":

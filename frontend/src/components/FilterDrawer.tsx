@@ -1,13 +1,14 @@
 import React, { useEffect, useRef } from 'react';
-import { X, RotateCcw, Check } from 'lucide-react';
-import { EXCHANGES, SIGNALS, SIGNAL_LABELS, UNIVERSES } from '../lib/constants';
+import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
+import { EXCHANGES, SIGNALS, UNIVERSES, SIGNAL_LABELS } from '../lib/constants';
 import { FilterState } from '../lib/urlFilter';
 
 interface FilterDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   tempFilters: FilterState;
-  onFilterChange: (key: keyof FilterState, value: any) => void;
+  onFilterChange: (key: keyof FilterState, value: string | number) => void;
   onApply: () => void;
   onReset: () => void;
 }
@@ -20,110 +21,134 @@ export const FilterDrawer: React.FC<FilterDrawerProps> = ({
   onApply,
   onReset,
 }) => {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const firstInputRef = useRef<HTMLSelectElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const triggerElementRef = useRef<HTMLElement | null>(null);
 
-  // Focus management and Escape key handling
+  const returnFocusToTrigger = () => {
+    const btn = document.getElementById('open-filter-drawer-btn');
+    const target = triggerElementRef.current || btn;
+    if (target && typeof target.focus === 'function') {
+      target.focus();
+    }
+  };
+
+  const handleClose = () => {
+    returnFocusToTrigger();
+    onClose();
+  };
+
+  // Deterministic initial focus & true background isolation lifecycle
+  useEffect(() => {
+    if (!isOpen) return;
+
+    triggerElementRef.current = document.activeElement as HTMLElement;
+
+    // Isolate entire app shell background with inert and aria-hidden
+    const appShell = document.querySelector('.app-shell-root') as HTMLElement | null;
+    if (appShell) {
+      appShell.setAttribute('aria-hidden', 'true');
+      appShell.setAttribute('inert', '');
+    }
+
+    // Deterministically focus close button
+    if (closeBtnRef.current) {
+      closeBtnRef.current.focus();
+    }
+
+    return () => {
+      if (appShell) {
+        appShell.removeAttribute('aria-hidden');
+        appShell.removeAttribute('inert');
+      }
+    };
+  }, [isOpen]);
+
+  // Focus trap & Escape key handling
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        handleClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && drawerRef.current) {
+        const focusable = Array.from(
+          drawerRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
+
+        if (focusable.length === 0) return;
+
+        const firstElement = focusable[0];
+        const lastElement = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    // Focus first input on open
-    setTimeout(() => {
-      firstInputRef.current?.focus();
-    }, 50);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="drawer-title"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        zIndex: 200,
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'flex-end',
-      }}
+      className="filter-drawer-overlay"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
     >
       <div
-        ref={dialogRef}
-        className="card"
-        style={{
-          width: '100%',
-          maxWidth: '500px',
-          maxHeight: '90vh',
-          backgroundColor: 'var(--color-surface)',
-          borderTopLeftRadius: 'var(--radius-lg)',
-          borderTopRightRadius: 'var(--radius-lg)',
-          borderBottomLeftRadius: 0,
-          borderBottomRightRadius: 0,
-          padding: 'var(--space-5)',
-          overflowY: 'auto',
-          display: 'flex',
-          flexDirection: 'column',
-          boxShadow: 'var(--shadow-modal)',
-        }}
+        ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drawer-title"
+        className="filter-drawer-container"
       >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
-          <h2 id="drawer-title" className="text-h2">Bộ lọc cổ phiếu</h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 id="drawer-title" className="text-h2">
+            Bộ lọc cổ phiếu
+          </h2>
           <button
+            ref={closeBtnRef}
             type="button"
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--color-text-muted)',
-              padding: 'var(--space-1)',
-              borderRadius: 'var(--radius-sm)',
-            }}
+            onClick={handleClose}
             aria-label="Đóng bảng lọc"
+            className="filter-drawer-close-btn"
           >
             <X size={20} aria-hidden="true" />
           </button>
         </div>
 
-        {/* Filter Form Controls */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', flex: 1 }}>
+        {/* Form fields */}
+        <div className="flex flex-col gap-4">
           {/* Exchange */}
           <div>
-            <label htmlFor="drawer-exchange" style={{ display: 'block', fontWeight: 600, fontSize: '0.875rem', marginBottom: 'var(--space-1)' }}>
+            <label htmlFor="drawer-exchange" className="text-small font-semibold block mb-1">
               Sàn giao dịch
             </label>
             <select
               id="drawer-exchange"
-              ref={firstInputRef}
               value={tempFilters.exchange}
               onChange={(e) => onFilterChange('exchange', e.target.value)}
-              style={{
-                width: '100%',
-                padding: 'var(--space-2) var(--space-3)',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-border)',
-                backgroundColor: 'var(--color-surface)',
-                fontSize: '0.9375rem',
-              }}
+              className="filter-select"
             >
               {EXCHANGES.map((ex) => (
                 <option key={ex} value={ex}>
@@ -135,25 +160,18 @@ export const FilterDrawer: React.FC<FilterDrawerProps> = ({
 
           {/* Universe */}
           <div>
-            <label htmlFor="drawer-universe" style={{ display: 'block', fontWeight: 600, fontSize: '0.875rem', marginBottom: 'var(--space-1)' }}>
-              Nhóm rổ cổ phiếu
+            <label htmlFor="drawer-universe" className="text-small font-semibold block mb-1">
+              Nhóm chỉ số
             </label>
             <select
               id="drawer-universe"
               value={tempFilters.universe}
               onChange={(e) => onFilterChange('universe', e.target.value)}
-              style={{
-                width: '100%',
-                padding: 'var(--space-2) var(--space-3)',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-border)',
-                backgroundColor: 'var(--color-surface)',
-                fontSize: '0.9375rem',
-              }}
+              className="filter-select"
             >
               {UNIVERSES.map((u) => (
                 <option key={u} value={u}>
-                  {u === 'ALL' ? 'Toàn thị trường' : 'VN30'}
+                  {u === 'ALL' ? 'Toàn thị trường' : 'Chỉ rổ VN30'}
                 </option>
               ))}
             </select>
@@ -161,147 +179,94 @@ export const FilterDrawer: React.FC<FilterDrawerProps> = ({
 
           {/* Signal */}
           <div>
-            <label htmlFor="drawer-signal" style={{ display: 'block', fontWeight: 600, fontSize: '0.875rem', marginBottom: 'var(--space-1)' }}>
-              Tín hiệu MA10
+            <label htmlFor="drawer-signal" className="text-small font-semibold block mb-1">
+              Tín hiệu kỹ thuật
             </label>
             <select
               id="drawer-signal"
               value={tempFilters.signal}
               onChange={(e) => onFilterChange('signal', e.target.value)}
-              style={{
-                width: '100%',
-                padding: 'var(--space-2) var(--space-3)',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-border)',
-                backgroundColor: 'var(--color-surface)',
-                fontSize: '0.9375rem',
-              }}
+              className="filter-select"
             >
-              {SIGNALS.map((sig) => (
-                <option key={sig} value={sig}>
-                  {sig === 'ALL' ? 'Tất cả tín hiệu' : SIGNAL_LABELS[sig] || sig}
+              {SIGNALS.map((s) => (
+                <option key={s} value={s}>
+                  {SIGNAL_LABELS[s] || s}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Distance range */}
+          {/* Min Avg Volume 20D */}
           <div>
-            <span style={{ display: 'block', fontWeight: 600, fontSize: '0.875rem', marginBottom: 'var(--space-1)' }}>
+            <label htmlFor="drawer-min-vol" className="text-small font-semibold block mb-1">
+              Khối lượng TB 20 phiên tối thiểu
+            </label>
+            <input
+              id="drawer-min-vol"
+              type="number"
+              min="0"
+              step="100000"
+              placeholder="VD: 100000"
+              value={tempFilters.minAvgVolume20d}
+              onChange={(e) => onFilterChange('minAvgVolume20d', e.target.value)}
+              className="filter-search-input"
+            />
+          </div>
+
+          {/* Distance Min / Max */}
+          <div>
+            <label className="text-small font-semibold block mb-1">
               Khoảng cách tới MA10 (%)
-            </span>
-            <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+            </label>
+            <div className="flex gap-2">
               <input
                 type="number"
+                step="0.5"
                 placeholder="Tối thiểu"
                 value={tempFilters.distanceMin}
                 onChange={(e) => onFilterChange('distanceMin', e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: 'var(--space-2) var(--space-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--color-border)',
-                  fontSize: '0.9375rem',
-                }}
                 aria-label="Khoảng cách tới MA10 tối thiểu"
+                className="filter-search-input flex-1"
               />
-              <span style={{ color: 'var(--color-text-muted)' }}>-</span>
               <input
                 type="number"
+                step="0.5"
                 placeholder="Tối đa"
                 value={tempFilters.distanceMax}
                 onChange={(e) => onFilterChange('distanceMax', e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: 'var(--space-2) var(--space-3)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--color-border)',
-                  fontSize: '0.9375rem',
-                }}
                 aria-label="Khoảng cách tới MA10 tối đa"
+                className="filter-search-input flex-1"
               />
             </div>
-          </div>
-
-          {/* Min Avg Volume 20D */}
-          <div>
-            <label htmlFor="drawer-volume" style={{ display: 'block', fontWeight: 600, fontSize: '0.875rem', marginBottom: 'var(--space-1)' }}>
-              Thanh khoản trung bình 20 phiên tối thiểu
-            </label>
-            <input
-              id="drawer-volume"
-              type="number"
-              min="0"
-              placeholder="Ví dụ: 100000"
-              value={tempFilters.minAvgVolume20d}
-              onChange={(e) => onFilterChange('minAvgVolume20d', e.target.value)}
-              style={{
-                width: '100%',
-                padding: 'var(--space-2) var(--space-3)',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-border)',
-                fontSize: '0.9375rem',
-              }}
-            />
           </div>
         </div>
 
         {/* Action buttons */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-3)',
-            marginTop: 'var(--space-6)',
-            paddingTop: 'var(--space-4)',
-            borderTop: '1px solid var(--color-border)',
-          }}
-        >
+        <div className="filter-drawer-actions">
           <button
             type="button"
-            onClick={onReset}
-            style={{
-              flex: 1,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 'var(--space-1)',
-              padding: 'var(--space-3)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border)',
-              backgroundColor: 'var(--color-surface)',
-              fontWeight: 600,
-              fontSize: '0.9375rem',
-              color: 'var(--color-text)',
-              cursor: 'pointer',
+            onClick={() => {
+              returnFocusToTrigger();
+              onReset();
             }}
+            className="btn-secondary flex-1 justify-center"
           >
-            <RotateCcw size={16} aria-hidden="true" />
-            <span>Xóa lọc</span>
+            Đặt lại
           </button>
           <button
             type="button"
-            onClick={onApply}
-            style={{
-              flex: 1,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 'var(--space-1)',
-              padding: 'var(--space-3)',
-              borderRadius: 'var(--radius-md)',
-              border: 'none',
-              backgroundColor: 'var(--color-primary)',
-              fontWeight: 600,
-              fontSize: '0.9375rem',
-              color: '#ffffff',
-              cursor: 'pointer',
+            onClick={() => {
+              returnFocusToTrigger();
+              onApply();
             }}
+            className="btn-primary flex-1 justify-center"
           >
-            <Check size={16} aria-hidden="true" />
-            <span>Áp dụng</span>
+            Áp dụng
           </button>
         </div>
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 };

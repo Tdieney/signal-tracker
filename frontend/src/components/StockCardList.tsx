@@ -22,109 +22,69 @@ export const StockCardList: React.FC<StockCardListProps> = ({ items }) => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }} role="list" aria-label="Danh sách cổ phiếu">
+    <div className="stock-card-list" role="list" aria-label="Danh sách cổ phiếu">
       {items.map((item) => {
         const isExpanded = expandedSymbols.has(item.symbol);
-        const distanceColor =
+        const distanceColorClass =
           item.distance_pct !== null && item.distance_pct !== undefined
             ? item.distance_pct > 0
-              ? 'var(--color-positive)'
+              ? 'text-positive'
               : item.distance_pct < 0
-              ? 'var(--color-negative)'
-              : 'inherit'
-            : 'inherit';
+              ? 'text-negative'
+              : ''
+            : '';
 
         return (
           <div
             key={item.symbol}
             role="listitem"
-            className="card"
-            style={{ padding: 'var(--space-3) var(--space-4)' }}
+            className="card stock-card"
           >
             {/* Header row: Symbol + Exchange + Signal */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-2">
                 <a
                   href={`#/symbols/${item.symbol}`}
-                  style={{ fontWeight: 700, fontSize: '1.125rem', color: 'var(--color-primary)' }}
+                  className="font-bold text-h3"
                 >
                   {item.symbol}
                 </a>
-                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="text-xs text-muted">
                   {item.exchange}
                 </span>
                 {item.in_vn30 && (
-                  <span
-                    style={{
-                      fontSize: '0.6875rem',
-                      backgroundColor: 'var(--color-primary-light)',
-                      color: 'var(--color-primary-strong)',
-                      padding: '1px 4px',
-                      borderRadius: 'var(--radius-sm)',
-                      fontWeight: 600,
-                    }}
-                  >
-                    VN30
-                  </span>
+                  <span className="badge-vn30">VN30</span>
                 )}
               </div>
               <SignalBadge signal={item.signal} compact />
             </div>
 
             {/* Price & Metric row */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 'var(--space-2)',
-                padding: 'var(--space-2) 0',
-                borderTop: '1px solid var(--color-border-subtle)',
-                borderBottom: '1px solid var(--color-border-subtle)',
-                fontSize: '0.875rem',
-              }}
-            >
+            <div className="stock-card-grid">
               <div>
-                <span className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'block' }}>Close</span>
-                <span style={{ fontWeight: 600 }}>{formatPrice(item.close)}</span>
+                <span className="text-xs text-muted block mb-1">Đóng cửa:</span>
+                <span className="font-semibold text-body">{formatPrice(item.close)}</span>
               </div>
               <div>
-                <span className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'block' }}>MA10</span>
-                <span>{formatPrice(item.ma10)}</span>
+                <span className="text-xs text-muted block mb-1">MA10:</span>
+                <span className="font-medium text-body">{formatPrice(item.ma10)}</span>
               </div>
               <div>
-                <span className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'block' }}>Distance</span>
-                <span style={{ fontWeight: 600, color: distanceColor }}>{formatDistance(item.distance_pct)}</span>
+                <span className="text-xs text-muted block mb-1">Khoảng cách:</span>
+                <span className={`font-semibold ${distanceColorClass}`}>{formatDistance(item.distance_pct)}</span>
               </div>
             </div>
 
             {/* Bottom row: Avg Vol + Expand Button */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginTop: 'var(--space-2)',
-                fontSize: '0.8125rem',
-              }}
-            >
-              <span style={{ color: 'var(--color-text-muted)' }}>
-                Avg Vol 20D: <strong>{formatVolumeCompact(item.avg_volume_20d)}</strong>
+            <div className="flex justify-between items-center mt-2 text-small">
+              <span className="text-muted">
+                Avg Vol 20D: <strong className="text-body">{formatVolumeCompact(item.avg_volume_20d)}</strong>
               </span>
 
               <button
                 type="button"
                 onClick={() => toggleExpand(item.symbol)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--color-primary)',
-                  fontSize: '0.8125rem',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '2px',
-                  cursor: 'pointer',
-                  padding: '4px',
-                }}
+                className="stock-card-expand-btn"
                 aria-expanded={isExpanded}
                 aria-label={isExpanded ? `Thu gọn thông tin mã ${item.symbol}` : `Xem thêm chi tiết mã ${item.symbol}`}
               >
@@ -135,28 +95,18 @@ export const StockCardList: React.FC<StockCardListProps> = ({ items }) => {
 
             {/* Expanded section */}
             {isExpanded && (
-              <div
-                style={{
-                  marginTop: 'var(--space-2)',
-                  paddingTop: 'var(--space-2)',
-                  borderTop: '1px dashed var(--color-border-subtle)',
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  gap: 'var(--space-2)',
-                  fontSize: '0.8125rem',
-                }}
-              >
+              <div className="stock-card-expanded-section">
                 <div>
-                  <span className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'block' }}>Volume phiên:</span>
+                  <span className="text-xs text-muted block">Volume phiên:</span>
                   <span>{formatVolume(item.volume)}</span>
                 </div>
                 <div>
-                  <span className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'block' }}>Trạng thái:</span>
+                  <span className="text-xs text-muted block">Trạng thái:</span>
                   <span>{DATA_STATUS_LABELS[item.data_status] || item.data_status}</span>
                 </div>
                 {item.last_trading_date && (
                   <div>
-                    <span className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'block' }}>Phiên gần nhất:</span>
+                    <span className="text-xs text-muted block">Phiên gần nhất:</span>
                     <span>{formatDateVi(item.last_trading_date)}</span>
                   </div>
                 )}

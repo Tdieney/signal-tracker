@@ -9,7 +9,7 @@ export function parseHashRoute(hash: string): RouteType {
   const [pathPart, queryPart] = cleanHash.split('?');
   const path = pathPart || '/';
 
-  if (path === '/' || path === '') {
+  if (path === '/' || path === '' || path === '/main-content' || path === 'main-content') {
     return { name: 'overview' };
   }
 

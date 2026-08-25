@@ -48,12 +48,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Test & Coverage
+# Test & Coverage & Staging
 coverage/
 frontend/coverage/
 .nyc_output/
 playwright-report/
+frontend/playwright-report/
 test-results/
+frontend/test-results/
+/.staging_data/
 
 # OS & IDE
 .DS_Store

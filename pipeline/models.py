@@ -36,6 +36,7 @@ class DataStatus(str, Enum):
 
 class MarketSessionStatus(str, Enum):
     CLOSED_CONFIRMED = "CLOSED_CONFIRMED"
+    UNKNOWN = "UNKNOWN"
 
 
 class FreshnessStatus(str, Enum):

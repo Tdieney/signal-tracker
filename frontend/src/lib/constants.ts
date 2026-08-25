@@ -4,6 +4,9 @@ export const SUPPORTED_SCHEMA_VERSION = "1.0.0";
 export const FINANCIAL_DISCLAIMER =
   "Tín hiệu chỉ phản ánh quy tắc kỹ thuật trên dữ liệu cuối ngày, không phải khuyến nghị mua hoặc bán. Dữ liệu có thể chậm, thiếu hoặc sai; hãy kiểm tra lại với nguồn được cấp phép trước khi ra quyết định.";
 
+export const DISCLAIMER_FOOTER =
+  "Tín hiệu chỉ phản ánh quy tắc kỹ thuật trên dữ liệu cuối ngày, không phải khuyến nghị mua hoặc bán. Dữ liệu có thể chậm, thiếu hoặc sai; hãy kiểm tra lại với nguồn được cấp phép trước khi ra quyết định. Không cung cấp đặt lệnh, không lưu trữ tài khoản, không cam kết lợi nhuận.";
+
 export const SIGNAL_LABELS: Record<string, string> = {
   ABOVE_MA10: "Trên MA10",
   BELOW_MA10: "Dưới MA10",

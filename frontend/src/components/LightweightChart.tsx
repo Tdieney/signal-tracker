@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Table, BarChart2 } from 'lucide-react';
 import {
   ColorType,
   CrosshairMode,
@@ -13,42 +14,45 @@ interface LightweightChartProps {
   symbol: string;
 }
 
-export const LightweightChart: React.FC<LightweightChartProps> = ({ series, symbol }) => {
+export const LightweightChart: React.FC<LightweightChartProps> = ({
+  series,
+  symbol,
+}) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const [showDataAlternative, setShowDataAlternative] = useState(false);
+  const [showTable, setShowTable] = useState(false);
 
   useEffect(() => {
-    if (!chartContainerRef.current || series.length === 0) return;
+    if (showTable || !chartContainerRef.current || series.length === 0) return;
 
-    // Create TradingView Lightweight Chart instance
+    // Initialize Chart
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: '#ffffff' },
-        textColor: '#566176',
+        textColor: '#1f242f',
         fontSize: 12,
-        fontFamily: 'Inter, system-ui, sans-serif',
+        fontFamily: 'Inter, sans-serif',
       },
       grid: {
-        vertLines: { color: '#eef2f7' },
-        horzLines: { color: '#eef2f7' },
+        vertLines: { color: '#f1f3f7' },
+        horzLines: { color: '#f1f3f7' },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
       },
       rightPriceScale: {
-        borderColor: '#d7deea',
+        borderColor: '#e1e5ee',
         scaleMargins: {
           top: 0.1,
-          bottom: 0.25, // Leave bottom space for volume histogram
+          bottom: 0.25,
         },
       },
       timeScale: {
-        borderColor: '#d7deea',
+        borderColor: '#e1e5ee',
         timeVisible: false,
       },
-      width: chartContainerRef.current.clientWidth,
-      height: 380,
+      handleScale: true,
+      handleScroll: true,
     });
 
     chartRef.current = chart;
@@ -57,36 +61,12 @@ export const LightweightChart: React.FC<LightweightChartProps> = ({ series, symb
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#087a55',
       downColor: '#b42318',
-      borderVisible: false,
+      borderUpColor: '#087a55',
+      borderDownColor: '#b42318',
       wickUpColor: '#087a55',
       wickDownColor: '#b42318',
     });
 
-    // 2. MA10 Line Series
-    const ma10Series = chart.addLineSeries({
-      color: '#2457d6',
-      lineWidth: 2,
-      priceLineVisible: false,
-      title: 'MA10',
-    });
-
-    // 3. Volume Histogram Series (scaled at bottom)
-    const volumeSeries = chart.addHistogramSeries({
-      color: '#a0aec0',
-      priceFormat: {
-        type: 'volume',
-      },
-      priceScaleId: 'volume',
-    });
-
-    chart.priceScale('volume').applyOptions({
-      scaleMargins: {
-        top: 0.8,
-        bottom: 0,
-      },
-    });
-
-    // Prepare data arrays
     const candleData = series.map((s) => ({
       time: s.trading_date,
       open: s.open,
@@ -94,6 +74,14 @@ export const LightweightChart: React.FC<LightweightChartProps> = ({ series, symb
       low: s.low,
       close: s.close,
     }));
+    candleSeries.setData(candleData);
+
+    // 2. MA10 Line Series
+    const ma10Series = chart.addLineSeries({
+      color: '#2457d6',
+      lineWidth: 2,
+      priceLineVisible: false,
+    });
 
     const ma10Data = series
       .filter((s) => s.ma10 !== null && s.ma10 !== undefined)
@@ -101,25 +89,38 @@ export const LightweightChart: React.FC<LightweightChartProps> = ({ series, symb
         time: s.trading_date,
         value: s.ma10 as number,
       }));
+    ma10Series.setData(ma10Data);
+
+    // 3. Volume Histogram Series
+    const volumeSeries = chart.addHistogramSeries({
+      color: '#9ba4b5',
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '', // Overlay scale
+    });
+
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.8,
+        bottom: 0,
+      },
+    });
 
     const volumeData = series.map((s) => ({
       time: s.trading_date,
       value: s.volume,
-      color: s.close >= s.open ? 'rgba(8, 122, 85, 0.35)' : 'rgba(180, 35, 24, 0.35)',
+      color: s.close >= s.open ? 'rgba(8, 122, 85, 0.4)' : 'rgba(180, 35, 24, 0.4)',
     }));
-
-    candleSeries.setData(candleData);
-    ma10Series.setData(ma10Data);
     volumeSeries.setData(volumeData);
 
-    // Fit content
     chart.timeScale().fitContent();
 
-    // Resize Observer for container responsiveness
+    // Responsive Resize Observer
     const resizeObserver = new ResizeObserver((entries) => {
       if (entries.length === 0 || !entries[0].contentRect) return;
-      const { width } = entries[0].contentRect;
-      chart.applyOptions({ width });
+      const { width, height } = entries[0].contentRect;
+      chart.applyOptions({ width, height });
     });
 
     resizeObserver.observe(chartContainerRef.current);
@@ -129,102 +130,93 @@ export const LightweightChart: React.FC<LightweightChartProps> = ({ series, symb
       chart.remove();
       chartRef.current = null;
     };
-  }, [series]);
+  }, [series, showTable]);
 
   return (
-    <div className="card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
-      {/* Header and Controls */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 'var(--space-2)',
-          marginBottom: 'var(--space-3)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <h2 className="text-h2">Biểu đồ giá & MA10</h2>
-          {/* Legend */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', fontSize: '0.8125rem' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '12px', height: '12px', backgroundColor: '#087a55', borderRadius: '2px' }} />
-              Tăng
+    <div className="card chart-panel">
+      <div className="chart-header">
+        <div>
+          <h2 className="text-h2">
+            Biểu đồ giá &amp; MA10 — {symbol}
+          </h2>
+          <div className="chart-legend mt-1">
+            <span className="chart-legend-item">
+              <span className="legend-swatch-up" aria-hidden="true" />
+              <span>Tăng</span>
             </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '12px', height: '12px', backgroundColor: '#b42318', borderRadius: '2px' }} />
-              Giảm
+            <span className="chart-legend-item">
+              <span className="legend-swatch-down" aria-hidden="true" />
+              <span>Giảm</span>
             </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '14px', height: '3px', backgroundColor: '#2457d6', borderRadius: '2px' }} />
-              MA10
+            <span className="chart-legend-item">
+              <span className="legend-swatch-ma10" aria-hidden="true" />
+              <span>MA10</span>
             </span>
           </div>
         </div>
 
         <button
           type="button"
-          onClick={() => setShowDataAlternative(!showDataAlternative)}
-          style={{
-            background: 'none',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-sm)',
-            padding: 'var(--space-1) var(--space-3)',
-            fontSize: '0.8125rem',
-            color: 'var(--color-primary)',
-            cursor: 'pointer',
-          }}
-          aria-expanded={showDataAlternative}
+          onClick={() => setShowTable(!showTable)}
+          className="chart-toggle-btn"
+          aria-expanded={showTable}
+          aria-label={showTable ? 'Chuyển sang xem biểu đồ' : 'Chuyển sang xem bảng dữ liệu'}
         >
-          {showDataAlternative ? 'Ẩn bảng số liệu' : 'Xem dạng bảng dữ liệu'}
+          {showTable ? (
+            <span className="flex items-center gap-1">
+              <BarChart2 size={14} aria-hidden="true" />
+              <span>Xem biểu đồ</span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <Table size={14} aria-hidden="true" />
+              <span>Xem dạng bảng</span>
+            </span>
+          )}
         </button>
       </div>
 
-      {/* Lightweight Chart Container */}
-      <div
-        ref={chartContainerRef}
-        style={{ width: '100%', height: '380px', position: 'relative' }}
-        role="region"
-        aria-label={`Biểu đồ nến và đường MA10 cho mã ${symbol}`}
-      />
-
-      {/* Accessible Table Alternative */}
-      {showDataAlternative && (
-        <div style={{ marginTop: 'var(--space-4)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-3)' }}>
-          <div className="scrollable-region" style={{ maxHeight: '260px' }} tabIndex={0}>
-            <table
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '0.875rem',
-                textAlign: 'left',
-              }}
-            >
-              <caption className="text-small" style={{ textAlign: 'left', paddingBottom: 'var(--space-2)', fontWeight: 600 }}>
-                Lịch sử phiên giao dịch gần nhất của {symbol}
-              </caption>
+      {!showTable ? (
+        <div
+          ref={chartContainerRef}
+          role="region"
+          aria-label={`Biểu đồ nến kỹ thuật và đường trung bình MA10 của mã ${symbol}`}
+          tabIndex={0}
+          className="chart-container-lightweight"
+        />
+      ) : (
+        <div
+          className="chart-table-alt-wrapper"
+          tabIndex={0}
+          role="region"
+          aria-label={`Bảng dữ liệu lịch sử giá và MA10 của mã ${symbol}`}
+        >
+          <div className="scrollable-region chart-table-scroll">
+            <table className="data-table">
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface-muted)' }}>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)' }}>Phiên</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>Open</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>High</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>Low</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>Close</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>MA10</th>
-                  <th style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>Volume</th>
+                <tr className="data-table-header-row">
+                  <th className="data-table-th">Ngày</th>
+                  <th className="data-table-th data-table-th-right">Open</th>
+                  <th className="data-table-th data-table-th-right">High</th>
+                  <th className="data-table-th data-table-th-right">Low</th>
+                  <th className="data-table-th data-table-th-right">Close</th>
+                  <th className="data-table-th data-table-th-right">MA10</th>
+                  <th className="data-table-th data-table-th-right">Volume</th>
                 </tr>
               </thead>
               <tbody>
-                {[...series].reverse().map((pt) => (
-                  <tr key={pt.trading_date} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)' }}>{formatDateVi(pt.trading_date)}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>{formatPrice(pt.open)}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>{formatPrice(pt.high)}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>{formatPrice(pt.low)}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right', fontWeight: 600 }}>{formatPrice(pt.close)}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>{formatPrice(pt.ma10)}</td>
-                    <td style={{ padding: 'var(--space-2) var(--space-3)', textAlign: 'right' }}>{formatVolume(pt.volume)}</td>
+                {series.slice().reverse().map((s, idx) => (
+                  <tr
+                    key={s.trading_date}
+                    className={`data-table-row ${idx % 2 !== 0 ? 'data-table-row-alt' : ''}`}
+                  >
+                    <td className="data-table-td font-semibold">{formatDateVi(s.trading_date)}</td>
+                    <td className="data-table-td-right">{formatPrice(s.open)}</td>
+                    <td className="data-table-td-right">{formatPrice(s.high)}</td>
+                    <td className="data-table-td-right">{formatPrice(s.low)}</td>
+                    <td className="data-table-td-right font-bold">{formatPrice(s.close)}</td>
+                    <td className="data-table-td-right">{formatPrice(s.ma10)}</td>
+                    <td className="data-table-td-right">{formatVolume(s.volume)}</td>
                   </tr>
                 ))}
               </tbody>

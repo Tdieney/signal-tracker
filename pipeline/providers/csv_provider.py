@@ -1,4 +1,4 @@
-"""Deterministic CSV data provider implementation."""
+"""Deterministic CSV data provider implementation with sanitized warning messages and precise row accounting."""
 
 from __future__ import annotations
 
@@ -10,10 +10,13 @@ from pipeline.providers.base import DataProvider
 
 
 class CsvDataProvider(DataProvider):
-    """Loads OHLCV records from a local CSV file deterministically."""
+    """Loads OHLCV records from a local CSV file deterministically without leaking raw payloads into warnings."""
 
     def __init__(self, csv_filepath: str):
         self.csv_filepath = csv_filepath
+        self.source_rows_count = 0
+        self.rejected_rows_count = 0
+        self.parse_warnings: List[str] = []
         if not os.path.exists(csv_filepath):
             raise FileNotFoundError(f"CSV fixture file not found: {csv_filepath}")
 
@@ -26,39 +29,80 @@ class CsvDataProvider(DataProvider):
         """Parse CSV file and return OHLCVRecord list filtered by symbols and date range."""
         records: List[OHLCVRecord] = []
         symbol_set = set(s.upper() for s in symbols) if symbols else None
+        self.source_rows_count = 0
+        self.rejected_rows_count = 0
+        self.parse_warnings = []
 
         with open(self.csv_filepath, mode="r", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
-            for row in reader:
+            for row_idx, row in enumerate(reader, start=2):
+                if not row or not any(row.values()):
+                    continue
+
+                self.source_rows_count += 1
+
                 # Normalize field names by lowercasing and stripping
-                cleaned_row = {k.strip().lower(): (v.strip() if v is not None else "") for k, v in row.items() if k}
+                cleaned_row = {
+                    k.strip().lower(): (v.strip() if v is not None else "")
+                    for k, v in row.items()
+                    if k is not None
+                }
 
                 date_str = cleaned_row.get("trading_date") or cleaned_row.get("date") or ""
-                sym = (cleaned_row.get("symbol") or cleaned_row.get("ticker") or "").upper()
+                raw_sym = cleaned_row.get("symbol") or cleaned_row.get("ticker") or ""
+                sym = raw_sym.upper()[:10]  # sanitize symbol string length
                 ex = (cleaned_row.get("exchange") or "HOSE").upper()
 
                 if symbol_set and sym not in symbol_set:
+                    # Filtered out by caller symbol set; decrement source_rows_count so invariants hold
+                    self.source_rows_count -= 1
                     continue
                 if start_date and date_str < start_date:
+                    self.source_rows_count -= 1
                     continue
                 if end_date and date_str > end_date:
+                    self.source_rows_count -= 1
                     continue
 
                 try:
-                    open_val = float(cleaned_row.get("open", 0))
-                    high_val = float(cleaned_row.get("high", 0))
-                    low_val = float(cleaned_row.get("low", 0))
-                    close_val = float(cleaned_row.get("close", 0))
+                    open_str = cleaned_row.get("open", "")
+                    high_str = cleaned_row.get("high", "")
+                    low_str = cleaned_row.get("low", "")
+                    close_str = cleaned_row.get("close", "")
                     vol_str = cleaned_row.get("volume", "0")
+
+                    if not (open_str and high_str and low_str and close_str):
+                        self.rejected_rows_count += 1
+                        self.parse_warnings.append(f"Row {row_idx}: Missing required OHLC price values for symbol {sym}")
+                        continue
+
+                    open_val = float(open_str)
+                    high_val = float(high_str)
+                    low_val = float(low_str)
+                    close_val = float(close_str)
                     volume_val = int(float(vol_str)) if vol_str else 0
                 except (ValueError, TypeError):
+                    self.rejected_rows_count += 1
+                    # Sanitized warning: do not dump raw unparsed payload or raw exception text
+                    self.parse_warnings.append(f"Row {row_idx}: Non-numeric OHLC price or volume field for symbol {sym}")
                     continue
 
                 adj_close_str = cleaned_row.get("adjusted_close") or cleaned_row.get("adj_close")
-                adj_close = float(adj_close_str) if adj_close_str else None
+                adj_close = None
+                if adj_close_str:
+                    try:
+                        adj_close = float(adj_close_str)
+                    except (ValueError, TypeError):
+                        # Row is accepted with None, but sanitized warning is recorded
+                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional adjusted_close field for symbol {sym}")
 
                 val_str = cleaned_row.get("trading_value") or cleaned_row.get("value")
-                trading_val = float(val_str) if val_str else None
+                trading_val = None
+                if val_str:
+                    try:
+                        trading_val = float(val_str)
+                    except (ValueError, TypeError):
+                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional trading_value field for symbol {sym}")
 
                 vn30_str = cleaned_row.get("in_vn30", "").lower()
                 in_vn30 = vn30_str in ("true", "1", "yes", "t")

@@ -35,6 +35,13 @@ unique(symbol, trading_date)
 - Không forward-fill OHLCV cho ngày không giao dịch.
 - Mỗi mã tính rolling window trên các phiên hợp lệ của chính mã đó.
 - Corporate action: ưu tiên `adjusted_close` nếu provider có dữ liệu đáng tin và metadata nói rõ; Phase 1 mặc định dùng `close` cho tín hiệu để bám đúng định nghĩa README. Không tự đổi sang adjusted data.
+- **Quy tắc xử lý lỗi và phân cấp trạng thái chất lượng (`QualityStatus`)**:
+  - Khi một dòng dữ liệu vi phạm các trường bắt buộc (thiếu hoặc sai format ngày, mã, sàn, giá OHLC âm/không hữu hạn, vi phạm bất biến OHLC, volume âm): dòng đó bị loại bỏ hoàn toàn (`rejected_rows` tăng), và một cảnh báo đã khử khuẩn (`sanitized warning`) được ghi nhận mà không chứa chuỗi dữ liệu thô nhạy cảm.
+  - Khi các trường số tùy chọn (`adjusted_close`, `trading_value`) không hợp lệ: dòng có thể được tiếp nhận với giá trị `None` nhưng lỗi được ghi nhận vào `parse_warnings` và `quality.status` bị hạ cấp, không được phép duy trì ở mức `PASS`.
+  - `quality.status` được xác định:
+    - `PASS`: 0 dòng bị loại (`rejected_rows == 0`) và không có cảnh báo vi phạm;
+    - `PARTIAL` / `WARNING`: Có dòng bị loại hoặc có cảnh báo về trường tùy chọn nhưng vẫn có ít nhất 1 dòng hợp lệ (`accepted_rows > 0`);
+    - `FAIL`: Không có dòng hợp lệ nào (`accepted_rows == 0`).
 
 ## 3. Công thức baseline
 
@@ -131,15 +138,15 @@ frontend/public/data/
 ```json
 {
   "schema_version": "1.0.0",
-  "dataset_id": "2026-08-21T11:30:00Z",
+  "dataset_id": "9e364ba5b6d803e8",
   "as_of_date": "2026-08-21",
-  "generated_at": "2026-08-21T11:30:00Z",
+  "generated_at": "2026-08-21T10:00:00Z",
   "market_timezone": "Asia/Ho_Chi_Minh",
-  "market_session_status": "CLOSED_CONFIRMED",
+  "market_session_status": "UNKNOWN",
   "freshness": {
-    "status": "FRESH",
+    "status": "UNKNOWN",
     "expected_as_of_date": "2026-08-21",
-    "reason": "Latest expected completed trading session"
+    "reason": "Dữ liệu mẫu thử nghiệm (fixture/demo), không phải dữ liệu thị trường trực tiếp."
   },
   "provider": "csv",
   "universe": "ALL",
@@ -150,23 +157,26 @@ frontend/public/data/
   },
   "quality": {
     "status": "PASS",
-    "input_rows": 120000,
-    "accepted_rows": 119980,
-    "rejected_rows": 20,
-    "eligible_symbols": 1540,
+    "input_rows": 300,
+    "accepted_rows": 300,
+    "rejected_rows": 0,
+    "eligible_symbols": 12,
     "warnings": []
   }
 }
 ```
 
-`provider` là tên public không nhạy cảm; không ghi endpoint, account, path máy build hay credential identifier.
+- `market_session_status`: `CLOSED_CONFIRMED` | `UNKNOWN`. Giá trị an toàn mặc định là `UNKNOWN` đối với fixture/offline data (bỏ enum DEMO để tránh contract drift; tính chất demo được nhận diện qua `provider: "csv"` và `freshness.status: "UNKNOWN"`).
+- `freshness.status`: `FRESH` | `STALE` | `UNKNOWN`.
+- `provider`: `csv` | `vnstock` | `company_api`. Tên public không nhạy cảm.
+- `dataset_id`: Chuỗi băm SHA-256 16 ký tự hex (`^[a-f0-9]{16}$`) tính từ canonical sorted JSON của toàn bộ input dữ liệu công khai và quality metadata. Trường `generated_at` là volatile timestamp nên được loại khỏi canonical identity payload để đảm bảo tính tất định.
 
 ## 7. `overview.json`
 
 ```json
 {
   "schema_version": "1.0.0",
-  "dataset_id": "2026-08-21T11:30:00Z",
+  "dataset_id": "9e364ba5b6d803e8",
   "as_of_date": "2026-08-21",
   "metrics": {
     "eligible_count": 1540,
@@ -196,7 +206,7 @@ frontend/public/data/
 ```json
 {
   "schema_version": "1.0.0",
-  "dataset_id": "2026-08-21T11:30:00Z",
+  "dataset_id": "9e364ba5b6d803e8",
   "as_of_date": "2026-08-21",
   "items": [
     {
@@ -226,7 +236,7 @@ Frontend giới hạn sort field bằng allow-list; không truy cập property t
 ```json
 {
   "schema_version": "1.0.0",
-  "dataset_id": "2026-08-21T11:30:00Z",
+  "dataset_id": "9e364ba5b6d803e8",
   "symbol": "FPT",
   "exchange": "HOSE",
   "as_of_date": "2026-08-21",

@@ -82,13 +82,14 @@ GitHub Pages (Static Hosting & GitHub Actions Deployment)
 
 ### Yêu cầu môi trường
 - **Python**: 3.8+ (khuyên dùng Python 3.10+)
-- **Node.js**: v18+ hoặc v20+
+- **Node.js**: v18+, v20+ hoặc v24+
 - **npm**: v9+
 
 ### Bước 1: Cài đặt dependencies cho Frontend
 ```bash
 cd frontend
-npm install
+npm ci
+npx playwright install --with-deps chromium firefox webkit
 cd ..
 ```
 
@@ -115,14 +116,14 @@ python scripts/build_all.py
 
 ### Chạy từng bước độc lập:
 
-1. **Kiểm thử Python Pipeline**:
+1. **Kiểm thử Python Pipeline (36 unit tests)**:
    ```bash
    python -m unittest discover tests -v
    ```
 
-2. **Kiểm thử Frontend (Vitest)**:
+2. **Kiểm thử Frontend (20 Vitest unit tests)**:
    ```bash
-   npm --prefix frontend test
+   npm --prefix frontend test -- --run
    ```
 
 3. **Kiểm tra kiểu TypeScript (Typecheck)**:
@@ -130,14 +131,19 @@ python scripts/build_all.py
    npm --prefix frontend run typecheck
    ```
 
-4. **Build gói tĩnh cho Production**:
+4. **Build gói tĩnh cho Production (GitHub Pages base path)**:
    ```bash
-   npm --prefix frontend run build
+   npm --prefix frontend run build:pages
    ```
 
 5. **Quét bảo mật và kiểm tra Allow-list Artifact**:
    ```bash
    python scripts/security_check.py --artifact frontend/dist
+   ```
+
+6. **Kiểm thử E2E & Accessibility đa trình duyệt (Playwright 98 tests + Axe)**:
+   ```bash
+   npm --prefix frontend run test:e2e
    ```
 
 ---
@@ -151,21 +157,23 @@ python scripts/build_all.py
    - Bật tùy chọn **Enforce HTTPS**.
 
 2. **Tự động deploy**:
-   - Workflow `.github/workflows/deploy-pages.yml` sẽ tự động chạy theo lịch sau giờ đóng cửa phiên giao dịch (17:30 ICT các ngày làm việc thứ Hai đến thứ Sáu) hoặc khi kích hoạt thủ công qua nút **Run workflow** trên tab Actions.
+   - Workflow `.github/workflows/deploy-pages.yml` sẽ tự động kích hoạt khi push lên branch `main`/`master` hoặc khi kích hoạt thủ công qua nút **Run workflow** trên tab Actions.
 
 ---
 
 ## 6. Chính sách An toàn & Bảo mật
 
 - **Không chứa Secret ở Frontend**: Mọi biến môi trường, API keys, token đều tuyệt đối không được đưa vào frontend hoặc commit lên Git.
-- **Static Content Security Policy (CSP)**: `index.html` được thiết lập CSP nghiêm ngặt không cho phép tải script từ xa hoặc dùng `unsafe-eval`.
-- **Runtime Data Validation**: Frontend sử dụng Zod schema để kiểm tra tính toàn vẹn của mọi file JSON, tự động từ chối nếu không khớp `schema_version` hoặc `dataset_id`.
+- **Static Content Security Policy (CSP)**: `index.html` được thiết lập CSP nghiêm ngặt không cho phép `unsafe-eval` hoặc remote script. Thẻ style của thư viện biểu đồ được cấp quyền qua hash mã hóa tĩnh (`sha256-3pRED1tOXas1FXFoPb9TGCjmYe9XQsmO9OV23khV2nY=`).
+- **Fail-Closed Runtime Validation**: Frontend sử dụng Zod schema để kiểm tra tính toàn vẹn của mọi file JSON, tự động khóa hiển thị tín hiệu và hiển thị thông báo an toàn nếu `manifest.json` lỗi hoặc không khớp `dataset_id`.
 - **Thao tác dữ liệu an toàn**: Không sử dụng `dangerouslySetInnerHTML`, không dùng `eval`, mã cổ phiếu và query parameter đều được sanitize và kiểm tra qua allow-list.
 
 ---
 
 ## 7. Giới hạn đã biết của Phase 1
 
-- Dữ liệu là **cuối ngày (EOD)** sau khi phiên giao dịch kết thúc, không phản ánh biến động realtime trong phiên.
-- Chỉ số kỹ thuật chỉ áp dụng cho **MA10** và khối lượng trung bình 20 phiên. Các chỉ báo mở rộng (MA20, RSI, MACD) nằm trong kế hoạch Phase 2.
+- **Chế độ dữ liệu mẫu**: Hiện hệ thống đang chạy ở chế độ Demo Fixture an toàn (trạng thái session là `UNKNOWN`).
+- **Giới hạn provider**: `VnstockDataProvider` là experimental research stub và bị khóa (fail closed) trong Phase 1; hệ thống sử dụng `CsvDataProvider` được kiểm thử xác thực.
+- **Dữ liệu cuối ngày**: Dữ liệu là **cuối ngày (EOD)** sau khi phiên giao dịch kết thúc, không phản ánh biến động realtime trong phiên.
+- **Chỉ số kỹ thuật**: Chỉ áp dụng cho **MA10** và khối lượng trung bình 20 phiên. Các chỉ báo mở rộng (MA20, RSI, MACD) nằm trong kế hoạch Phase 2.
 - Không hỗ trợ đặt lệnh, lưu danh mục trực tuyến hay tích hợp tài khoản cá nhân.
