@@ -10,19 +10,37 @@ from typing import Any, Dict, List, Optional
 SCHEMA_VERSION = "1.0.0"
 MARKET_TIMEZONE = "Asia/Ho_Chi_Minh"
 
-VN30_SYMBOLS: tuple[str, ...] = (
-    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
-    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
-    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE",
+@dataclass(frozen=True)
+class UniverseMetadata:
+    name: str
+    version: str
+    effective_date: str
+    source: str
+    constituents: tuple[str, ...]
+
+
+# HOSE VN30 Index Periodic Review (Effective August 3, 2026): MCH & TCX added, PLX & TPB removed.
+VN30_UNIVERSE_CONFIG = UniverseMetadata(
+    name="VN30",
+    version="2026-08-03",
+    effective_date="2026-08-03",
+    source="HOSE VN30 Index Periodic Review August 2026",
+    constituents=(
+        "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
+        "MBB", "MCH", "MSN", "MWG", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
+        "TCB", "TCX", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE",
+    ),
 )
+
+VN30_SYMBOLS: tuple[str, ...] = VN30_UNIVERSE_CONFIG.constituents
 
 
 def get_universe_symbols(universe_name: str = "VN30") -> list[str]:
     """Return standard symbol list for the requested universe."""
     clean_name = (universe_name or "VN30").strip().upper()
     if clean_name in ("VN30", "ALL"):
-        return list(VN30_SYMBOLS)
-    return list(VN30_SYMBOLS)
+        return list(VN30_UNIVERSE_CONFIG.constituents)
+    return list(VN30_UNIVERSE_CONFIG.constituents)
 
 
 class SignalType(str, Enum):

@@ -1,4 +1,4 @@
-"""Modular Vnstock data provider adapter for Vietnam stock market data."""
+"""Modular Vnstock data provider adapter for Vietnam stock market data (Quarantined)."""
 
 from __future__ import annotations
 
@@ -23,29 +23,27 @@ logger = logging.getLogger("vn_stock_signal.vnstock_provider")
 class VnstockDataProvider(BaseMarketDataProvider):
     """Adapter for fetching OHLCV records via vnstock / market data endpoints.
 
-    Supports dependency injection via fetch_fn for testing, or live fetching via VnstockMarketClient.
+    STATUS: QUARANTINED / PENDING LICENCE VERIFICATION
+    Live fetching is locked fail-closed in production.
+    Supports dependency injection via fetch_fn or mock client for offline testing.
     """
 
     def __init__(
         self,
-        rate_limit_delay_seconds: float = 0.05,
+        rate_limit_delay_seconds: float = 0.5,
         max_retries: int = 3,
         fetch_fn: Optional[Callable[[str, str, str], List[Dict]]] = None,
         client: Optional[VnstockMarketClient] = None,
         is_live: bool = False,
     ):
+        if is_live:
+            raise RuntimeError(
+                "Live market data provider disabled: unverified provider licence / pending authorization."
+            )
         self.rate_limit_delay_seconds = max(0.0, rate_limit_delay_seconds)
         self.max_retries = max(1, max_retries)
         self._fetch_fn = fetch_fn
-        if client is not None:
-            self._client = client
-        elif is_live:
-            self._client = VnstockMarketClient(
-                rate_limit_delay_seconds=self.rate_limit_delay_seconds,
-                max_retries=self.max_retries,
-            )
-        else:
-            self._client = None
+        self._client = client
 
     @property
     def provider_name(self) -> str:
@@ -57,7 +55,7 @@ class VnstockDataProvider(BaseMarketDataProvider):
             return ProviderHealth(
                 is_healthy=False,
                 provider_name=self.provider_name,
-                message="Vnstock adapter is an unconfigured experimental stub; no active market client configured.",
+                message="Vnstock adapter is quarantined and disabled pending provider licence authorization.",
             )
 
         if self._client is not None:
@@ -93,7 +91,7 @@ class VnstockDataProvider(BaseMarketDataProvider):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> ProviderFetchResult:
-        """Fetch and normalize OHLCV records with genuine retry execution and sanitized warnings."""
+        """Fetch and normalize OHLCV records with genuine retry execution, strict accounting, and sanitized warnings."""
         records: List[OHLCVRecord] = []
         warnings: List[str] = []
         input_rows = 0
@@ -105,7 +103,7 @@ class VnstockDataProvider(BaseMarketDataProvider):
         sha = hashlib.sha256()
 
         if self._fetch_fn is None and self._client is None:
-            warnings.append("Vnstock live endpoint not configured; returning empty dataset.")
+            warnings.append("Vnstock adapter is quarantined/unconfigured; returning empty dataset.")
             return ProviderFetchResult(
                 records=[],
                 provider_name=self.provider_name,
@@ -163,6 +161,11 @@ class VnstockDataProvider(BaseMarketDataProvider):
                 input_rows += 1
                 try:
                     raw_date = str(item.get("trading_date") or item.get("date") or "")
+                    if not raw_date or raw_date == "None":
+                        rejected_rows += 1
+                        warnings.append("Malformed or missing trading_date in record")
+                        continue
+
                     open_val = float(item["open"])
                     high_val = float(item["high"])
                     low_val = float(item["low"])
@@ -208,7 +211,7 @@ class VnstockDataProvider(BaseMarketDataProvider):
                 symbols_with_enough_data += 1
 
         is_complete = (len(target_symbols) > 0 and symbols_with_enough_data == len(target_symbols))
-        provenance = "vnstock_live" if self._client is not None else "vnstock_mock"
+        provenance = "vnstock_mock"
 
         return ProviderFetchResult(
             records=records,

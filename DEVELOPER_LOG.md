@@ -1347,3 +1347,87 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Zero secrets stored in frontend or Git repository.
   - Fully automated daily scheduled cron updates after Vietnam market close with transactional Last-Known-Good rollback safety.
 - Remaining work: Stage explicit files, commit, push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and smoke test live Pages deployment across viewports.
+
+---
+
+## 2026-08-25T22:56:00+07:00 — agy-20260825-phase3-emergency-containment — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Emergency Forward-Only Containment for Phase 3 Reviewer Findings:
+  1. Record honest correction: Repository owner selected "Vnstock Community / Open Quotes" in dialog, but that selection did NOT authorize direct access to DNSE/EnTrade (`services.entrade.com.vn`) or public redistribution rights of DNSE data. Phase 3 is officially PAUSED/BLOCKED pending provider licence verification.
+  2. Disable live publication immediately: Remove cron schedule from `.github/workflows/deploy-pages.yml`.
+  3. Revert CI, Deploy workflow, `scripts/build_all.py`, and public dataset to deterministic offline CSV fixture demo mode (`provider="csv"`, `freshness.status="UNKNOWN"`, `market_session_status="UNKNOWN"`).
+  4. Ensure zero external network calls in CI, unit/integration tests, master build, Pages deployment, and default local builds.
+  5. Quarantine Phase 3 live provider implementation: lock unapproved live provider fail-closed, prevent direct execution without verified licence.
+  6. Fix data engine completeness logic: require all universe symbols to have valid records on `expected_as_of_date` before marking `FRESH` or `CLOSED_CONFIRMED`.
+  7. Enforce fail-closed dataset promotion: if any symbol is completely missing from a live universe fetch, the pipeline must fail closed (raise error) and preserve previous successful deployments.
+  8. Fix raw row accounting invariant in data adapters: all upstream payload rows must be accounted for as accepted or rejected with sanitized warnings.
+  9. Update `VN30_UNIVERSE_CONFIG` with canonical source, version (`2026-08-03`), effective date, and constituents (`MCH` and `TCX` replacing `PLX` and `TPB`), avoiding duplicate definitions.
+  10. Update `docs/10-provider-decision-record.md` status to `NOT APPROVED / BLOCKED`, mark provider licence as `UNVERIFIED` and provider as `DISABLED`.
+  11. Update `README.md` and operations runbook to accurately reflect demo CSV status, absence of live cron, paused Phase 3, and failure recovery semantics.
+  12. Add mock-based regression tests for completeness, missing symbol fail-closed abort, raw row accounting, and universe metadata.
+  13. Execute all release gates, commit via forward commit, push to `origin/main`, monitor CI/Deploy workflows, and smoke test live Pages deployment.
+- Planned Files:
+  - `DEVELOPER_LOG.md` [MODIFY]
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `.github/workflows/ci.yml` [MODIFY]
+  - `scripts/build_all.py` [MODIFY]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `pipeline/models.py` [MODIFY]
+  - `pipeline/providers/vnstock_client.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `frontend/public/data/*` [MODIFY]
+  - `docs/10-provider-decision-record.md` [MODIFY]
+- Pre-existing working tree state: Exact commit `d51654c9cc32b78ff39b2467c00ad1db5bfcd607`, diagnostics `error.png`, `logs_88886054015.zip`, `logs_88886054015/` preserved untracked.
+
+---
+
+## 2026-08-25T23:01:00+07:00 — agy-20260825-phase3-emergency-containment — COMPLETED-CONTAINMENT
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Emergency Forward-Only Containment for Phase 3 Reviewer Findings:
+  1. Recorded honest correction: Repository owner selected "Vnstock Community / Open Quotes" in dialog, but that selection did NOT authorize direct access to DNSE/EnTrade (`services.entrade.com.vn`) or public redistribution rights of DNSE data. Phase 3 is officially PAUSED/BLOCKED pending provider licence verification.
+  2. Disabled live publication: Removed cron schedule from `.github/workflows/deploy-pages.yml`.
+  3. Reverted `.github/workflows/deploy-pages.yml`, `.github/workflows/ci.yml`, and `scripts/build_all.py` to deterministic offline CSV fixture build (`tests/fixtures/sample_ohlcv.csv`) with fixed generated-at `2026-08-21T10:00:00Z`.
+  4. Regenerated public data directory `frontend/public/data` using approved CSV fixture: manifest restored to `provider="csv"`, `freshness.status="UNKNOWN"`, `market_session_status="UNKNOWN"`, with clear demo banner.
+  5. Quarantined Phase 3 live provider implementation: `VnstockDataProvider(is_live=True)` is locked fail-closed (raises `RuntimeError`), preventing accidental live execution without verified licence.
+  6. Enforced strict universe completeness in `pipeline/build_dataset.py`: require 100% of requested universe symbols to have eligible data on `target_as_of` before marking `is_complete=True`.
+  7. Enforced fail-closed dataset promotion: if any constituent is missing entirely from a live universe fetch, `build_dataset_from_records` raises `ValueError` to abort staging promotion and preserve prior successful deployments.
+  8. Fixed raw row accounting invariant in `pipeline/providers/vnstock_client.py` and `vnstock_provider.py`: all raw payload rows (including nonpositive prices and array-length mismatches) are strictly accounted for as accepted or rejected with sanitized warnings (`input_rows == accepted_rows + rejected_rows`).
+  9. Defined canonical `VN30_UNIVERSE_CONFIG` in `pipeline/models.py` with `version="2026-08-03"`, `effective_date="2026-08-03"`, `source="HOSE VN30 Index Periodic Review August 2026"`, and constituents tuple (`MCH` and `TCX` replacing `PLX` and `TPB`). Removed duplicate constant definitions.
+  10. Updated `docs/10-provider-decision-record.md` to `NOT APPROVED / BLOCKED`, marked licence as `UNVERIFIED` and provider as `DISABLED`.
+  11. Updated `README.md` and `docs/09-operations-troubleshooting.md` to document safe CSV demo mode, absence of live cron, and paused Phase 3 status.
+  12. Added comprehensive mock-based regression tests:
+      - `tests/test_vnstock_client.py`: 8 tests verifying canonical universe metadata, raw row accounting preservation, array-length mismatch accounting, quarantine fail-closed guard, retries, and probe.
+      - `tests/test_live_dataset_pipeline.py`: 3 tests verifying complete mock VN30 pipeline generation, adversarial incomplete as-of date coverage yielding non-fresh / unknown session, and fail-closed missing constituent abort.
+- Files Changed:
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `.github/workflows/ci.yml` [MODIFY]
+  - `scripts/build_all.py` [MODIFY]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `pipeline/models.py` [MODIFY]
+  - `pipeline/providers/vnstock_client.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `frontend/public/data/*` [MODIFY/NEW/DELETE]
+  - `docs/10-provider-decision-record.md` [MODIFY]
+  - `docs/09-operations-troubleshooting.md` [MODIFY]
+  - `README.md` [MODIFY]
+  - `tests/test_vnstock_client.py` [MODIFY]
+  - `tests/test_live_dataset_pipeline.py` [MODIFY]
+  - `tests/test_provider_interface.py` [MODIFY]
+  - `DEVELOPER_LOG.md` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: 82 tests passed (81 passed, 1 skipped for OS symlink permission), 100% offline.
+  - `npm.cmd --prefix frontend test -- --run`: 38 Vitest unit tests passed across 6 test files.
+  - `npm.cmd --prefix frontend run typecheck`: 0 TypeScript errors.
+  - `npm.cmd --prefix frontend run build:pages`: Static production build succeeded.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 violations.
+  - `npm.cmd --prefix frontend audit --audit-level=high`: 0 vulnerabilities.
+  - `npm.cmd --prefix frontend run test:e2e`: 104 passed, 4 skipped across 6 browser configurations.
+  - `python scripts/build_all.py`: All 10 master gate steps passed with exit code 0.
+  - `git diff --check`: 0 trailing whitespace warnings.
+- Safety, Security & Data Provenance Impact:
+  - Zero external network requests during builds, test suites, or CI pipelines.
+  - Verified demo CSV dataset (`dataset_id="2ea695ca7b138940"`, `provider="csv"`, `freshness.status="UNKNOWN"`, `market_session_status="UNKNOWN"`).
+  - Unapproved live provider quarantined and fail-closed.
+- Remaining work: Stage explicit files, commit via forward commit, push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and smoke test live Pages deployment across viewports.

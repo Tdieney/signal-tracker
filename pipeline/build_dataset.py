@@ -141,8 +141,23 @@ def build_dataset_from_records(
     # 4. Calculate Market Breadth
     as_of_metric, breadth_history = calculate_market_breadth(indicators_by_symbol, target_as_of)
 
-    # 5. Fix quality eligible_symbols to exact breadth-eligible count
+    # 5. Fix quality eligible_symbols and enforce strict universe completeness
     quality_info.eligible_symbols = as_of_metric.eligible_count
+
+    universe_symbols = set(get_universe_symbols(universe_name)) if universe_name in ("VN30", "ALL") else set()
+    present_symbols = set(indicators_by_symbol.keys())
+
+    if is_live_provider and universe_symbols:
+        missing_symbols = universe_symbols - present_symbols
+        if missing_symbols:
+            raise ValueError(
+                f"Fail-closed abort: Missing {len(missing_symbols)} constituent(s) completely from universe {universe_name}"
+            )
+        # Must have full eligible coverage on target_as_of for completeness
+        if as_of_metric.eligible_count < len(universe_symbols):
+            is_complete = False
+    elif not is_live_provider:
+        is_complete = False
 
     # 6. Resolve deterministic reference time
     ref_dt = reference_time
@@ -279,7 +294,7 @@ def main() -> None:
         raw_result = provider.fetch_ohlcv()
     elif args.provider.lower() == "vnstock":
         universe_symbols = get_universe_symbols(args.universe)
-        provider = VnstockDataProvider(is_live=True)
+        provider = VnstockDataProvider(is_live=False)
         raw_result = provider.fetch_ohlcv(symbols=universe_symbols)
     else:
         provider = CompanyApiDataProvider()
