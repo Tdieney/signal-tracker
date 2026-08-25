@@ -1,42 +1,15 @@
-"""Unit and adversarial tests for VnstockMarketClient, universe metadata, and raw accounting."""
+"""Unit and adversarial tests for offline VnstockMarketClient parser, universe metadata, and raw accounting."""
 
-import io
-import json
 import unittest
-import urllib.error
-import urllib.request
-from unittest.mock import MagicMock
+from datetime import datetime, timezone
 
 from pipeline.models import VN30_SYMBOLS, VN30_UNIVERSE_CONFIG
 from pipeline.providers.vnstock_client import VnstockMarketClient
 from pipeline.providers.vnstock_provider import VnstockDataProvider
 
 
-class DummyHTTPResponse(io.BytesIO):
-    """Mock urllib response object."""
-    def __init__(self, data: bytes, code: int = 200):
-        super().__init__(data)
-        self.code = code
-        self.status = code
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-
 class TestVnstockMarketClient(unittest.TestCase):
-    """Test suite verifying VnstockMarketClient behavior, raw accounting, retries, and quarantine guards."""
-
-    def setUp(self):
-        self.mock_opener = MagicMock(spec=urllib.request.OpenerDirector)
-        self.client = VnstockMarketClient(
-            rate_limit_delay_seconds=0.0,
-            max_retries=3,
-            timeout_seconds=5.0,
-            opener=self.mock_opener,
-        )
+    """Test suite verifying VnstockMarketClient offline parsing, raw accounting, date filtering, and quarantine guards."""
 
     def test_vn30_canonical_universe_metadata_and_constituents(self):
         """Verify VN30 canonical universe metadata: effective date 2026-08-03, MCH/TCX included, PLX/TPB excluded."""
@@ -61,8 +34,8 @@ class TestVnstockMarketClient(unittest.TestCase):
         for sym in constituents:
             self.assertTrue(sym.isalnum() and sym.isupper(), f"Invalid symbol: {sym}")
 
-    def test_fetch_daily_bars_successful_response(self):
-        """Verify parsing of standard OHLCV payload format."""
+    def test_parse_raw_payload_success(self):
+        """Verify offline parsing of standard OHLCV payload format."""
         mock_payload = {
             "t": [1787277600, 1787536800, 1787623200],
             "o": [70.0, 71.0, 71.5],
@@ -71,10 +44,8 @@ class TestVnstockMarketClient(unittest.TestCase):
             "c": [71.5, 72.0, 70.7],
             "v": [5000000, 4500000, 4690000],
         }
-        mock_resp = DummyHTTPResponse(json.dumps(mock_payload).encode("utf-8"))
-        self.mock_opener.open.return_value = mock_resp
 
-        bars = self.client.fetch_daily_bars("FPT", lookback_days=30)
+        bars = VnstockMarketClient.parse_raw_payload(mock_payload, "FPT")
         self.assertEqual(len(bars), 3)
 
         latest = bars[-1]
@@ -97,10 +68,9 @@ class TestVnstockMarketClient(unittest.TestCase):
             "c": [71.5, -5.0],  # Negative close
             "v": [5000000, 4500000],
         }
-        mock_resp = DummyHTTPResponse(json.dumps(mock_payload).encode("utf-8"))
-        self.mock_opener.open.return_value = mock_resp
 
-        provider = VnstockDataProvider(client=self.client)
+        client = VnstockMarketClient(fixture_fetcher=lambda sym: mock_payload)
+        provider = VnstockDataProvider(client=client)
         result = provider.fetch_ohlcv(symbols=["FPT"])
 
         self.assertEqual(result.input_rows, 2)
@@ -108,6 +78,45 @@ class TestVnstockMarketClient(unittest.TestCase):
         self.assertEqual(result.rejected_rows, 1)
         self.assertTrue(len(result.warnings) > 0)
         self.assertEqual(result.input_rows, result.accepted_rows + result.rejected_rows)
+
+    def test_raw_row_accounting_with_date_range_filtering(self):
+        """Regression test: Rows outside start_date/end_date are strictly accounted as rejected_rows.
+
+        Demonstrates that input_rows == accepted_rows + rejected_rows invariant holds exactly
+        when date filtering is applied.
+        """
+        # Timestamps for dates:
+        # 2026-08-01, 2026-08-05, 2026-08-10, 2026-08-15, 2026-08-20
+        d1 = int(datetime(2026, 8, 1, tzinfo=timezone.utc).timestamp())
+        d2 = int(datetime(2026, 8, 5, tzinfo=timezone.utc).timestamp())
+        d3 = int(datetime(2026, 8, 10, tzinfo=timezone.utc).timestamp())
+        d4 = int(datetime(2026, 8, 15, tzinfo=timezone.utc).timestamp())
+        d5 = int(datetime(2026, 8, 20, tzinfo=timezone.utc).timestamp())
+
+        mock_payload = {
+            "t": [d1, d2, d3, d4, d5],
+            "o": [70.0, 71.0, 72.0, 73.0, 74.0],
+            "h": [71.0, 72.0, 73.0, 74.0, 75.0],
+            "l": [69.0, 70.0, 71.0, 72.0, 73.0],
+            "c": [70.5, 71.5, 72.5, 73.5, 74.5],
+            "v": [1000, 1000, 1000, 1000, 1000],
+        }
+
+        client = VnstockMarketClient(fixture_fetcher=lambda sym: mock_payload)
+        provider = VnstockDataProvider(client=client)
+
+        # Filter to 2026-08-08 .. 2026-08-18 (should accept d3, d4 = 2 rows; reject d1, d2, d5 = 3 rows)
+        result = provider.fetch_ohlcv(
+            symbols=["FPT"],
+            start_date="2026-08-08",
+            end_date="2026-08-18",
+        )
+
+        self.assertEqual(result.input_rows, 5)
+        self.assertEqual(result.accepted_rows, 2)
+        self.assertEqual(result.rejected_rows, 3)
+        self.assertEqual(result.input_rows, result.accepted_rows + result.rejected_rows)
+        self.assertTrue(any("outside requested date range" in w for w in result.warnings))
 
     def test_array_length_mismatch_strict_accounting(self):
         """Verify array length mismatch is accounted as rejected rows with sanitized warnings."""
@@ -119,10 +128,9 @@ class TestVnstockMarketClient(unittest.TestCase):
             "c": [71.5, 72.0, 70.7],
             "v": [5000000, 4500000, 4690000],
         }
-        mock_resp = DummyHTTPResponse(json.dumps(mock_payload).encode("utf-8"))
-        self.mock_opener.open.return_value = mock_resp
 
-        provider = VnstockDataProvider(client=self.client)
+        client = VnstockMarketClient(fixture_fetcher=lambda sym: mock_payload)
+        provider = VnstockDataProvider(client=client)
         result = provider.fetch_ohlcv(symbols=["FPT"])
 
         self.assertEqual(result.input_rows, 3)
@@ -141,52 +149,16 @@ class TestVnstockMarketClient(unittest.TestCase):
         self.assertFalse(health.is_healthy)
         self.assertIn("quarantined", health.message.lower())
 
-    def test_fetch_daily_bars_retries_on_transient_failure(self):
-        """Verify automatic retry with backoff on transient HTTP 500 error."""
-        error_resp = urllib.error.HTTPError("https://services.entrade.com.vn", 500, "Server Error", {}, None)
-        valid_payload = {
-            "t": [1787623200],
-            "o": [71.5],
-            "h": [72.0],
-            "l": [70.7],
-            "c": [70.7],
-            "v": [4690000],
-        }
-        success_resp = DummyHTTPResponse(json.dumps(valid_payload).encode("utf-8"))
+    def test_network_transport_disabled_and_quarantined(self):
+        """Verify VnstockMarketClient has zero network transport and raises RuntimeError if live fetch attempted."""
+        client_no_fixture = VnstockMarketClient()
+        with self.assertRaises(RuntimeError) as ctx:
+            client_no_fixture.fetch_daily_bars("FPT")
+        self.assertIn("disabled", str(ctx.exception).lower())
 
-        self.mock_opener.open.side_effect = [error_resp, error_resp, success_resp]
-
-        bars = self.client.fetch_daily_bars("FPT")
-        self.assertEqual(len(bars), 1)
-        self.assertEqual(self.mock_opener.open.call_count, 3)
-
-    def test_fetch_daily_bars_fails_gracefully_on_persistent_error(self):
-        """Verify persistent HTTP error returns empty list without crashing."""
-        error_resp = urllib.error.HTTPError("https://services.entrade.com.vn", 503, "Service Unavailable", {}, None)
-        self.mock_opener.open.side_effect = error_resp
-
-        bars = self.client.fetch_daily_bars("FPT")
-        self.assertEqual(bars, [])
-        self.assertEqual(self.mock_opener.open.call_count, 3)
-
-    def test_probe_success_and_failure(self):
-        """Verify probe returns correct health tuple."""
-        mock_payload = {
-            "t": [1787623200],
-            "o": [71.5],
-            "h": [72.0],
-            "l": [70.7],
-            "c": [70.7],
-            "v": [4690000],
-        }
-        self.mock_opener.open.return_value = DummyHTTPResponse(json.dumps(mock_payload).encode("utf-8"))
-        is_ok, msg, lat = self.client.probe("FPT")
-        self.assertTrue(is_ok)
-        self.assertIn("succeeded", msg)
-
-        self.mock_opener.open.side_effect = urllib.error.URLError("Connection refused")
-        is_ok_fail, msg_fail, lat_fail = self.client.probe("FPT")
-        self.assertFalse(is_ok_fail)
+        is_ok, msg, lat = client_no_fixture.probe("FPT")
+        self.assertFalse(is_ok)
+        self.assertIn("disabled", msg.lower())
 
 
 if __name__ == "__main__":

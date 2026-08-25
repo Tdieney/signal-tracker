@@ -15,8 +15,9 @@ Trong quá trình chuẩn bị Phase 3, chủ repository đã chọn phương á
 **Ghi nhận đính chính quan trọng:**
 1. Lựa chọn trên trong dialog chỉ là định hướng kỹ thuật ban đầu, **không cấu thành việc phê duyệt gọi trực tiếp vào endpoint của các công ty chứng khoán (như DNSE/EnTrade)** hoặc bất kỳ hệ thống phân phối nào khác.
 2. Quyền sử dụng lại và phân phối công khai (public redistribution) dữ liệu thị trường từ các cổng dịch vụ bên thứ ba trên GitHub Pages **chưa được xác minh (UNVERIFIED)** về mặt pháp lý và điều khoản dịch vụ (Terms of Service).
-3. Thư viện / mã nguồn Vnstock có giấy phép nguồn mở (MIT) cho phần code, nhưng **giấy phép mã nguồn không đồng nghĩa với quyền phân phối dữ liệu thị trường** lấy từ các API hạ tầng tài chính.
-4. Toàn bộ các tuyên bố chưa có nguồn kiểm chứng độc lập (về tính sẵn sàng cao, giới hạn tốc độ đoán định, quyền phân phối miễn phí) đã được **thu hồi và loại bỏ**.
+3. Thư viện mã nguồn Vnstock áp dụng giấy phép mã nguồn riêng (Custom Personal / Non-Commercial Research License) theo nguồn chính thức tại [Vnstock LICENSE.md](https://github.com/thinh-vu/vnstock/blob/main/LICENSE.md), **không phải giấy phép MIT**.
+4. Giấy phép mã nguồn phần mềm **tuyệt đối không đồng nghĩa với quyền phân phối hoặc tái xuất bản dữ liệu thị trường** lấy từ hạ tầng API tài chính của các bên thứ ba.
+5. Toàn bộ các tuyên bố chưa có nguồn kiểm chứng độc lập (về tính sẵn sàng cao, giới hạn tốc độ đoán định, quyền phân phối miễn phí) đã được **thu hồi và loại bỏ hoàn toàn**.
 
 ---
 

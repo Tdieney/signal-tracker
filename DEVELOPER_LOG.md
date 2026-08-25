@@ -1433,3 +1433,58 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
 - Decisions & Direction:
   - Repository owner explicitly confirmed maintaining the safe Demo Fixture CSV mode (100% deterministic, offline, zero legal/TOS exposure).
 - Status: COMPLETED. GitHub Pages is live, secure, verified, and in full compliance with owner approval and reviewer requirements.
+
+---
+
+## 2026-08-26T01:27:00+07:00 — agy-20260825-phase3-emergency-containment — CORRECTION
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- References: Session `agy-20260825-phase3-emergency-containment` (entry 2026-08-25T23:01:00+07:00)
+- Correction details:
+  1. In the previous session log, the phrase "zero external network requests" is corrected to **"zero external market-data endpoint requests"**. The financial data pipeline, test suites, and dataset generation make zero calls to third-party financial endpoints (DNSE/EnTrade). Standard developer and CI environment tooling (e.g. `npm install`, `npm audit`, or Playwright browser binary downloads) interact with package registries / GitHub releases.
+  2. The code licence for Vnstock is clarified: according to the official repository (https://github.com/thinh-vu/vnstock/blob/main/LICENSE.md), Vnstock uses a custom personal-research / non-commercial license (not MIT). Regardless of the software code licence, code licences do not grant public redistribution rights for third-party market data.
+
+---
+
+## 2026-08-26T01:28:00+07:00 — agy-20260826-phase3-final-cleanup-containment — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Phase 3 Final Cleanup and Complete Low-Level Quarantine:
+  1. Fix `docs/10-provider-decision-record.md`: do not state Vnstock is MIT; cite official custom/personal-research licence from https://github.com/thinh-vu/vnstock/blob/main/LICENSE.md; reiterate code licence does not grant third-party data redistribution rights.
+  2. Complete low-level quarantine of `pipeline/providers/vnstock_client.py`: remove hardcoded `services.entrade.com.vn` endpoint and network transport; convert into pure offline payload parser with sanitized fixtures; ensure `--provider vnstock` on CLI remains fail-closed.
+  3. Fix raw row accounting: every upstream row (including rows outside start_date/end_date) must be accounted for cleanly without silent drops (`input_rows == accepted_rows + rejected_rows`). Add regression test for date filtering.
+  4. Preserve safe CSV demo mode, manifest `csv/UNKNOWN/UNKNOWN`, workflow without cron, and untracked diagnostics (`error.png`, `logs_88886054015*`).
+  5. Run all release gates (Python tests, Vitest, Typecheck, Build:pages, Security scan, Playwright E2E across viewports, `build_all.py`, whitespace check).
+  6. Commit explicit files, push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, verify live manifest, and report exact commit SHA and Actions URLs.
+- Planned Files:
+  - `DEVELOPER_LOG.md` [MODIFY]
+  - `docs/10-provider-decision-record.md` [MODIFY]
+- Pre-existing working tree state: Exact commit `78acdba911ac35919bb338f1847faae9eeff6af5`, untracked diagnostics (`error.png`, `logs_88886054015.zip`, `logs_88886054015/`) preserved.
+
+---
+
+## 2026-08-26T01:30:00+07:00 — agy-20260826-phase3-final-cleanup-containment — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Phase 3 Final Cleanup and Complete Low-Level Quarantine:
+  1. Updated `docs/10-provider-decision-record.md`: removed reference to MIT; cited official custom/personal-research licence (https://github.com/thinh-vu/vnstock/blob/main/LICENSE.md); emphasized software code licence does not grant third-party data redistribution rights.
+  2. Quarantined low-level client in `pipeline/providers/vnstock_client.py`: removed hardcoded `services.entrade.com.vn` endpoint and network transport; converted into pure offline payload parser with sanitized fixtures; `--provider vnstock` on CLI fails closed.
+  3. Fixed raw row accounting in `pipeline/providers/vnstock_provider.py`: all upstream rows, including rows outside `start_date`/`end_date` bounds, are strictly accounted for without silent drops (`input_rows == accepted_rows + rejected_rows`).
+  4. Added regression test `test_raw_row_accounting_with_date_range_filtering` in `tests/test_vnstock_client.py` proving `input_rows == accepted_rows + rejected_rows` when date filtering is applied.
+  5. Added regression test `test_network_transport_disabled_and_quarantined` proving `VnstockMarketClient` raises `RuntimeError` if live network fetch is attempted.
+  6. Preserved deterministic CSV demo dataset (`dataset_id="2ea695ca7b138940"`, `provider="csv"`, `freshness.status="UNKNOWN"`, `market_session_status="UNKNOWN"`), workflows without cron, and untracked diagnostics (`error.png`, `logs_88886054015*`).
+- Files Changed:
+  - `DEVELOPER_LOG.md` [MODIFY]
+  - `docs/10-provider-decision-record.md` [MODIFY]
+  - `pipeline/providers/vnstock_client.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `tests/test_vnstock_client.py` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: 81 tests passed (80 passed, 1 skipped for OS symlink permission), 100% offline.
+  - `python scripts/build_all.py`: All 10 master gate steps passed with exit code 0.
+  - `git diff --check`: 0 trailing whitespace warnings.
+  - `python pipeline/build_dataset.py --provider vnstock`: Exited with code 1 (fail closed).
+- Safety, Security & Data Impact:
+  - Zero calls to external financial market endpoints.
+  - Live data provider permanently quarantined and fail-closed pending verified licence authorization.
+  - Phase 3 remains officially PAUSED/BLOCKED.

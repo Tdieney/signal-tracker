@@ -166,6 +166,17 @@ class VnstockDataProvider(BaseMarketDataProvider):
                         warnings.append("Malformed or missing trading_date in record")
                         continue
 
+                    # Explicit date boundary filtering accounting (preserves input_rows == accepted_rows + rejected_rows)
+                    if clean_start and clean_start != "[INVALID_DATE]" and raw_date < clean_start:
+                        rejected_rows += 1
+                        warnings.append("Record outside requested date range rejected")
+                        continue
+
+                    if clean_end and clean_end != "[INVALID_DATE]" and raw_date > clean_end:
+                        rejected_rows += 1
+                        warnings.append("Record outside requested date range rejected")
+                        continue
+
                     open_val = float(item["open"])
                     high_val = float(item["high"])
                     low_val = float(item["low"])

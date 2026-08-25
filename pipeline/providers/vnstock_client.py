@@ -1,58 +1,47 @@
-"""Quarantined client adapter for Vietnam equity EOD quotes (Pending licence verification)."""
+"""Quarantined payload parser and adapter for Vietnam equity EOD quotes (Pending licence verification)."""
 
 from __future__ import annotations
 
-import json
 import logging
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pipeline.models import VN30_SYMBOLS
 
 logger = logging.getLogger("vn_stock_signal.vnstock_client")
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
-
 
 class VnstockMarketClient:
-    """Quarantined HTTP client adapter for fetching daily OHLCV bars.
+    """Quarantined market client / payload parser.
 
-    STATUS: QUARANTINED / NOT APPROVED FOR PRODUCTION LIVE USE
-    NOTE: Access to external third-party market endpoints is strictly disabled in production
-    pipelines pending formal licence verification and explicit redistribution authorization.
+    STATUS: QUARANTINED / NETWORK TRANSPORT REMOVED / DISABLED FOR LIVE EXECUTION
+    NOTE: All external network transport and hardcoded endpoints have been completely removed.
+    This class functions strictly as an offline raw payload parser for test fixtures and mocks.
     """
 
     def __init__(
         self,
-        rate_limit_delay_seconds: float = 0.5,
-        max_retries: int = 3,
-        timeout_seconds: float = 10.0,
-        opener: Optional[urllib.request.OpenerDirector] = None,
+        rate_limit_delay_seconds: float = 0.0,
+        max_retries: int = 1,
+        timeout_seconds: float = 1.0,
+        fixture_fetcher: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
     ):
         self.rate_limit_delay_seconds = max(0.0, rate_limit_delay_seconds)
         self.max_retries = max(1, max_retries)
         self.timeout_seconds = max(1.0, timeout_seconds)
-        self._opener = opener or urllib.request.build_opener()
+        self._fixture_fetcher = fixture_fetcher
 
     def probe(self, symbol: str = "FPT") -> Tuple[bool, str, Optional[float]]:
-        """Perform a lightweight liveness probe."""
-        start_t = time.time()
-        try:
-            bars = self.fetch_daily_bars(symbol, lookback_days=5)
-            latency_ms = (time.time() - start_t) * 1000.0
-            if bars:
-                return True, "Market data endpoint probe succeeded", round(latency_ms, 2)
-            return False, "Market data endpoint probe returned empty result", round(latency_ms, 2)
-        except Exception:
-            latency_ms = (time.time() - start_t) * 1000.0
-            return False, "Market data endpoint probe failed", round(latency_ms, 2)
+        """Perform a quarantined probe without network execution."""
+        if self._fixture_fetcher is not None:
+            try:
+                res = self._fixture_fetcher(symbol)
+                if res is not None:
+                    return True, "Offline fixture probe succeeded", 0.0
+                return False, "Offline fixture probe returned empty", 0.0
+            except Exception:
+                return False, "Offline fixture probe failed", 0.0
+        return False, "Market data endpoint probe disabled (quarantined / no network transport)", None
 
     def fetch_daily_bars(
         self,
@@ -61,45 +50,40 @@ class VnstockMarketClient:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch daily OHLCV bars for a given symbol with rate-limiting and retries.
+        """Parse daily OHLCV bars from injected fixture or fail closed if live network is requested.
 
-        Preserves raw row accounting: all upstream records (including malformed ones)
-        are returned to the provider for strict input/accepted/rejected accounting.
+        Preserves 100% raw row accounting: every single raw element in upstream payload is parsed
+        and returned to the provider for strict input/accepted/rejected accounting.
         """
         clean_sym = symbol.strip().upper()
         if not clean_sym:
             return []
 
-        to_ts = int(time.time())
-        from_ts = to_ts - (lookback_days * 86400)
+        if self._fixture_fetcher is None:
+            # Network transport is completely removed
+            raise RuntimeError(
+                "Network transport disabled: external market endpoint access is quarantined."
+            )
 
-        url = (
-            f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock"
-            f"?from={from_ts}&to={to_ts}&symbol={clean_sym}&resolution=1D"
-        )
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Accept": "application/json",
-        }
+        raw_payload = self._fixture_fetcher(clean_sym)
+        return self.parse_raw_payload(raw_payload, clean_sym, start_date=start_date, end_date=end_date)
 
-        raw_payload = None
-        for attempt in range(1, self.max_retries + 1):
-            if self.rate_limit_delay_seconds > 0:
-                time.sleep(self.rate_limit_delay_seconds)
+    @classmethod
+    def parse_raw_payload(
+        cls,
+        raw_payload: Optional[Dict[str, Any]],
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Pure parser for upstream raw dictionary payload format {"t": [...], "o": [...], ...}.
 
-            req = urllib.request.Request(url, headers=headers)
-            try:
-                with self._opener.open(req, timeout=self.timeout_seconds) as resp:
-                    resp_bytes = resp.read()
-                    raw_payload = json.loads(resp_bytes.decode("utf-8"))
-                break
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-                if attempt < self.max_retries:
-                    backoff_delay = 0.5 * (2 ** (attempt - 1))
-                    time.sleep(backoff_delay)
-                else:
-                    raw_payload = None
-
+        Returns a standardized dictionary for EVERY single raw row index, including:
+        - valid rows (with trading_date, open, high, low, close, volume)
+        - malformed rows (with _malformed_reason)
+        - date-tagged rows (so provider can count input_rows and apply date-filter accounting)
+        """
+        clean_sym = symbol.strip().upper()
         if not raw_payload or not isinstance(raw_payload, dict):
             return []
 
@@ -131,7 +115,6 @@ class VnstockMarketClient:
         results: List[Dict[str, Any]] = []
 
         for i in range(total_raw_rows):
-            # Check array index bounds for each field
             has_all_fields = (
                 i < len(t_list)
                 and i < len(o_list)
@@ -142,7 +125,6 @@ class VnstockMarketClient:
             )
 
             if not has_all_fields:
-                # Array length mismatch: return malformed item for strict rejection accounting
                 results.append({
                     "trading_date": None,
                     "symbol": clean_sym,
@@ -160,11 +142,6 @@ class VnstockMarketClient:
             try:
                 ts = int(t_list[i])
                 dt_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
-
-                if start_date and dt_str < start_date:
-                    continue
-                if end_date and dt_str > end_date:
-                    continue
 
                 open_p = float(o_list[i])
                 high_p = float(h_list[i])
