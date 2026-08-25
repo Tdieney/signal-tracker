@@ -6,7 +6,7 @@ import logging
 import os
 import shutil
 from typing import List, Optional, Tuple
-from scripts.security_check import validate_data_directory
+from scripts.security_check import is_reparse_point_or_symlink, validate_data_directory
 
 logger = logging.getLogger("vn_stock_signal.dataset_manager")
 
@@ -20,11 +20,11 @@ def is_path_safe_and_within(child_path: str, parent_workspace: str) -> bool:
     if norm_child == norm_parent:
         return False
 
-    # Check for symlink in child_path or any existing ancestor component up to workspace
+    # Check for symlink/junction/reparse point in child_path or any existing ancestor component up to workspace
     check_p = os.path.abspath(child_path)
     abs_parent = os.path.abspath(parent_workspace)
     while len(check_p) >= len(abs_parent):
-        if os.path.islink(check_p):
+        if is_reparse_point_or_symlink(check_p):
             return False
         parent_p = os.path.dirname(check_p)
         if parent_p == check_p:
@@ -108,7 +108,7 @@ class DatasetManager:
         """Create a clean empty staging directory."""
         self._assert_safe_destructive_target(self.staging_dir)
         if os.path.exists(self.staging_dir):
-            if os.path.islink(self.staging_dir):
+            if is_reparse_point_or_symlink(self.staging_dir):
                 os.unlink(self.staging_dir)
             else:
                 shutil.rmtree(self.staging_dir)
@@ -128,25 +128,27 @@ class DatasetManager:
         return self._verify_directory(self.staging_dir)
 
     def publish_from_staging(self) -> Tuple[bool, List[str]]:
-        """Promote verified staging dataset to target with transactional failure rollback."""
+        """Promote verified staging dataset to target with transactional failure rollback and explicit commit point."""
         is_valid, errors = self.verify_staging()
         if not is_valid:
             return False, errors
 
         had_target = os.path.exists(self.target_dir)
+        had_lkg = os.path.exists(self.lkg_dir)
+        committed = False
 
         # 1. Clean swap directories
         self._assert_safe_destructive_target(self.swap_dir)
         if os.path.exists(self.swap_dir):
-            shutil.rmtree(self.swap_dir)
+            shutil.rmtree(self.swap_dir, ignore_errors=True)
 
         self._assert_safe_destructive_target(self.lkg_tmp)
         if os.path.exists(self.lkg_tmp):
-            shutil.rmtree(self.lkg_tmp)
+            shutil.rmtree(self.lkg_tmp, ignore_errors=True)
 
         self._assert_safe_destructive_target(self.lkg_swap)
         if os.path.exists(self.lkg_swap):
-            shutil.rmtree(self.lkg_swap)
+            shutil.rmtree(self.lkg_swap, ignore_errors=True)
 
         try:
             # 2. Back up existing target to swap_dir
@@ -162,53 +164,97 @@ class DatasetManager:
             # 4. Deep verify target directory after move
             target_valid, target_errors = self._verify_directory(self.target_dir)
             if not target_valid:
-                # Rollback step 3: delete partial/corrupted target, restore old target from swap_dir
+                # Pre-commit rollback: restore target from swap_dir
                 if os.path.exists(self.target_dir):
-                    shutil.rmtree(self.target_dir)
+                    shutil.rmtree(self.target_dir, ignore_errors=True)
                 if had_target and os.path.exists(self.swap_dir):
                     shutil.move(self.swap_dir, self.target_dir)
                 return False, [f"Target verification failed after move: {e}" for e in target_errors]
 
-            # 5. Safely update LKG backup
+            # 5. Create and verify LKG candidate in lkg_tmp
             shutil.copytree(self.target_dir, self.lkg_tmp)
             lkg_valid, lkg_errors = self._verify_directory(self.lkg_tmp)
             if not lkg_valid:
-                # Rollback step 5 and step 3
+                # Pre-commit rollback: restore target from swap_dir
                 if os.path.exists(self.lkg_tmp):
-                    shutil.rmtree(self.lkg_tmp)
+                    shutil.rmtree(self.lkg_tmp, ignore_errors=True)
                 if os.path.exists(self.target_dir):
-                    shutil.rmtree(self.target_dir)
+                    shutil.rmtree(self.target_dir, ignore_errors=True)
                 if had_target and os.path.exists(self.swap_dir):
                     shutil.move(self.swap_dir, self.target_dir)
-                return False, [f"LKG copy verification failed: {e}" for e in lkg_errors]
+                return False, [f"LKG candidate verification failed: {e}" for e in lkg_errors]
 
-            # Promote lkg_tmp to lkg_dir safely
-            had_lkg = os.path.exists(self.lkg_dir)
+            # 6. Back up existing LKG to lkg_swap
             if had_lkg:
                 shutil.move(self.lkg_dir, self.lkg_swap)
-            shutil.move(self.lkg_tmp, self.lkg_dir)
-            if had_lkg and os.path.exists(self.lkg_swap):
-                shutil.rmtree(self.lkg_swap)
 
-            # 6. Cleanup swap backup on successful completion
-            if os.path.exists(self.swap_dir):
-                shutil.rmtree(self.swap_dir)
+            # 7. Promote lkg_tmp to lkg_dir
+            shutil.move(self.lkg_tmp, self.lkg_dir)
+
+            # 8. Final deep verification of promoted LKG
+            lkg_promoted_valid, lkg_promoted_errors = self._verify_directory(self.lkg_dir)
+            if not lkg_promoted_valid:
+                # Pre-commit rollback: restore both target and LKG
+                if os.path.exists(self.lkg_dir):
+                    shutil.rmtree(self.lkg_dir, ignore_errors=True)
+                if had_lkg and os.path.exists(self.lkg_swap):
+                    shutil.move(self.lkg_swap, self.lkg_dir)
+                if os.path.exists(self.target_dir):
+                    shutil.rmtree(self.target_dir, ignore_errors=True)
+                if had_target and os.path.exists(self.swap_dir):
+                    shutil.move(self.swap_dir, self.target_dir)
+                return False, [f"Promoted LKG verification failed: {e}" for e in lkg_promoted_errors]
+
+            # =========================================================================
+            # COMMIT POINT: Both target_dir and lkg_dir are validated and promoted to V2.
+            # From this point forward, the transaction is COMMITTED.
+            # Failures in subsequent cleanup MUST NOT cause split-brain or revert target.
+            # =========================================================================
+            committed = True
+
+            # 9. Post-commit cleanup of temporary recovery directories
+            try:
+                if had_lkg and os.path.exists(self.lkg_swap):
+                    shutil.rmtree(self.lkg_swap)
+            except Exception as ex_clean_lkg:
+                logger.warning(f"Post-commit cleanup of lkg_swap failed (non-fatal): {ex_clean_lkg}")
+
+            try:
+                if os.path.exists(self.swap_dir):
+                    shutil.rmtree(self.swap_dir)
+            except Exception as ex_clean_swap:
+                logger.warning(f"Post-commit cleanup of swap_dir failed (non-fatal): {ex_clean_swap}")
 
             return True, []
+
         except Exception as e:
-            # Full transactional recovery on unexpected error
-            if os.path.exists(self.target_dir):
-                shutil.rmtree(self.target_dir, ignore_errors=True)
-            if had_target and os.path.exists(self.swap_dir):
-                shutil.move(self.swap_dir, self.target_dir)
+            if committed:
+                # Post-commit exception: target and LKG are already valid V2. Do NOT roll back to V1!
+                logger.error(f"Post-commit error during final cleanup: {e}")
+                return True, [f"Post-commit warning: {e}"]
+
+            # Pre-commit full recovery: restore both target and LKG to V1 byte-for-byte
             if os.path.exists(self.lkg_tmp):
                 shutil.rmtree(self.lkg_tmp, ignore_errors=True)
-            if os.path.exists(self.lkg_swap) and not os.path.exists(self.lkg_dir):
+
+            if had_lkg and os.path.exists(self.lkg_swap) and not os.path.exists(self.lkg_dir):
                 shutil.move(self.lkg_swap, self.lkg_dir)
-            if os.path.exists(self.lkg_swap):
+            elif os.path.exists(self.lkg_swap):
                 shutil.rmtree(self.lkg_swap, ignore_errors=True)
+
+            # If swap_dir exists, target was backed up to swap_dir and new target was placed/attempted.
+            # In this case, delete partial/new target and restore old target from swap_dir.
+            if had_target and os.path.exists(self.swap_dir):
+                if os.path.exists(self.target_dir):
+                    shutil.rmtree(self.target_dir, ignore_errors=True)
+                shutil.move(self.swap_dir, self.target_dir)
+            elif not had_target and os.path.exists(self.target_dir):
+                # Target was newly created from staging; remove it
+                shutil.rmtree(self.target_dir, ignore_errors=True)
+
             if os.path.exists(self.swap_dir):
                 shutil.rmtree(self.swap_dir, ignore_errors=True)
+
             return False, [f"Transactional publish failed: {e}"]
 
     def rollback_to_last_known_good(self) -> Tuple[bool, str]:
@@ -222,7 +268,7 @@ class DatasetManager:
 
         self._assert_safe_destructive_target(self.swap_dir)
         if os.path.exists(self.swap_dir):
-            shutil.rmtree(self.swap_dir)
+            shutil.rmtree(self.swap_dir, ignore_errors=True)
 
         had_target = os.path.exists(self.target_dir)
         try:
@@ -237,19 +283,19 @@ class DatasetManager:
             if not target_valid:
                 # Rollback restoration
                 if os.path.exists(self.target_dir):
-                    shutil.rmtree(self.target_dir)
+                    shutil.rmtree(self.target_dir, ignore_errors=True)
                 if had_target and os.path.exists(self.swap_dir):
                     shutil.move(self.swap_dir, self.target_dir)
                 return False, f"Target verification failed after LKG restoration: {target_errors}"
 
             if os.path.exists(self.swap_dir):
-                shutil.rmtree(self.swap_dir)
+                shutil.rmtree(self.swap_dir, ignore_errors=True)
             return True, "Successfully rolled back target directory to Last-Known-Good dataset."
         except Exception as e:
             if os.path.exists(self.target_dir):
                 shutil.rmtree(self.target_dir, ignore_errors=True)
-            if had_target and os.path.exists(self.swap_dir) and not os.path.exists(self.target_dir):
+            if had_target and os.path.exists(self.swap_dir):
                 shutil.move(self.swap_dir, self.target_dir)
             if os.path.exists(self.swap_dir):
                 shutil.rmtree(self.swap_dir, ignore_errors=True)
-            return False, f"Failed to restore from LKG: {e}"
+            return False, f"LKG rollback failed: {e}"

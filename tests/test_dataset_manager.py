@@ -12,7 +12,7 @@ from pipeline.dataset_manager import (
     are_paths_disjoint,
     is_path_safe_and_within,
 )
-from scripts.security_check import validate_data_directory
+from scripts.security_check import is_reparse_point_or_symlink, validate_data_directory
 
 
 class TestDatasetManager(unittest.TestCase):
@@ -214,19 +214,48 @@ class TestDatasetManager(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.target_dir, "manifest.json")))
         self.assertTrue(os.path.isfile(os.path.join(self.lkg_dir, "manifest.json")))
 
-    def test_injected_failure_at_staging_to_target_move(self):
-        """Inject failure when moving staging to target; verify target V1 restored byte-for-byte with 0 orphans."""
-        # 1. Establish V1
+    # -------------------------------------------------------------------------
+    # Comprehensive 11-point Failure Injection Test Suite
+    # -------------------------------------------------------------------------
+
+    def test_failure_injection_1_target_to_swap_move(self):
+        """1. Injected failure moving target -> swap; verify target V1 restored byte-for-byte with 0 orphans."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
         self.mgr.publish_from_staging()
-        v1_snapshot = self._snapshot_directory(self.target_dir)
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+        v1_lkg_snap = self._snapshot_directory(self.lkg_dir)
 
-        # 2. Stage V2
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
 
-        # Inject failure on shutil.move when moving staging -> target
+        original_move = shutil.move
+
+        def mock_move(src, dst):
+            if src == self.target_dir and dst == self.mgr.swap_dir:
+                raise OSError("Injected IO failure moving target to swap")
+            return original_move(src, dst)
+
+        with patch("shutil.move", side_effect=mock_move):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        self.assertEqual(v1_lkg_snap, self._snapshot_directory(self.lkg_dir))
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
+
+    def test_failure_injection_2_staging_to_target_move(self):
+        """2. Injected failure moving staging -> target; verify target V1 restored byte-for-byte with 0 orphans."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+        v1_lkg_snap = self._snapshot_directory(self.lkg_dir)
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+
         original_move = shutil.move
 
         def mock_move(src, dst):
@@ -238,21 +267,19 @@ class TestDatasetManager(unittest.TestCase):
             success, errors = self.mgr.publish_from_staging()
             self.assertFalse(success)
 
-        # Assert target was restored byte-for-byte
-        current_target_snapshot = self._snapshot_directory(self.target_dir)
-        self.assertEqual(v1_snapshot, current_target_snapshot)
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        self.assertEqual(v1_lkg_snap, self._snapshot_directory(self.lkg_dir))
         self.assertFalse(os.path.exists(self.mgr.swap_dir))
         self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
 
-    def test_injected_failure_at_target_post_validation(self):
-        """Inject failure during post-move target deep validation; verify target V1 restored byte-for-byte."""
-        # 1. Establish V1
+    def test_failure_injection_3_target_post_validation(self):
+        """3. Injected failure during post-move target deep validation; verify target V1 restored byte-for-byte."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
         self.mgr.publish_from_staging()
-        v1_snapshot = self._snapshot_directory(self.target_dir)
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+        v1_lkg_snap = self._snapshot_directory(self.lkg_dir)
 
-        # 2. Stage V2
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
 
@@ -268,49 +295,203 @@ class TestDatasetManager(unittest.TestCase):
             self.assertFalse(success)
             self.assertTrue(any("Injected post-move target deep validation failure" in e for e in errors))
 
-        # Assert target was restored byte-for-byte
-        current_target_snapshot = self._snapshot_directory(self.target_dir)
-        self.assertEqual(v1_snapshot, current_target_snapshot)
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        self.assertEqual(v1_lkg_snap, self._snapshot_directory(self.lkg_dir))
         self.assertFalse(os.path.exists(self.mgr.swap_dir))
 
-    def test_injected_failure_at_lkg_copy(self):
-        """Inject failure when copying target to lkg_tmp; verify target V1 restored byte-for-byte."""
-        # 1. Establish V1
+    def test_failure_injection_4_target_to_lkg_tmp_copy(self):
+        """4. Injected failure copying target -> lkg_tmp; verify target V1 restored byte-for-byte with 0 orphans."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
         self.mgr.publish_from_staging()
-        v1_snapshot = self._snapshot_directory(self.target_dir)
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+        v1_lkg_snap = self._snapshot_directory(self.lkg_dir)
 
-        # 2. Stage V2
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
 
-        with patch("shutil.copytree", side_effect=IOError("Injected failure during LKG copy")):
+        with patch("shutil.copytree", side_effect=IOError("Injected failure copying target to lkg_tmp")):
             success, errors = self.mgr.publish_from_staging()
             self.assertFalse(success)
 
-        # Assert target was restored byte-for-byte
-        current_target_snapshot = self._snapshot_directory(self.target_dir)
-        self.assertEqual(v1_snapshot, current_target_snapshot)
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        self.assertEqual(v1_lkg_snap, self._snapshot_directory(self.lkg_dir))
         self.assertFalse(os.path.exists(self.mgr.swap_dir))
         self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
 
-    def test_rollback_to_last_known_good_with_injected_failure(self):
-        """Test rollback_to_last_known_good restores LKG, and restores previous target if copy fails midway."""
-        # 1. Establish V1 in LKG
+    def test_failure_injection_5_lkg_tmp_validation(self):
+        """5. Injected validation failure on lkg_tmp candidate; verify target V1 and LKG V1 restored byte-for-byte."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+        v1_lkg_snap = self._snapshot_directory(self.lkg_dir)
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+
+        original_verify = self.mgr._verify_directory
+
+        def mock_verify(dir_path):
+            if os.path.abspath(dir_path) == os.path.abspath(self.mgr.lkg_tmp):
+                return False, ["Injected lkg_tmp candidate validation failure"]
+            return original_verify(dir_path)
+
+        with patch.object(self.mgr, "_verify_directory", side_effect=mock_verify):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+            self.assertTrue(any("Injected lkg_tmp candidate validation failure" in e for e in errors))
+
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        self.assertEqual(v1_lkg_snap, self._snapshot_directory(self.lkg_dir))
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
+
+    def test_failure_injection_6_lkg_to_lkg_swap_move(self):
+        """6. Injected failure moving old LKG -> lkg_swap; verify target V1 and LKG V1 restored byte-for-byte."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+        v1_lkg_snap = self._snapshot_directory(self.lkg_dir)
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+
+        original_move = shutil.move
+
+        def mock_move(src, dst):
+            if src == self.lkg_dir and dst == self.mgr.lkg_swap:
+                raise OSError("Injected IO failure moving old LKG to lkg_swap")
+            return original_move(src, dst)
+
+        with patch("shutil.move", side_effect=mock_move):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        self.assertEqual(v1_lkg_snap, self._snapshot_directory(self.lkg_dir))
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
+
+    def test_failure_injection_7_lkg_tmp_to_lkg_promotion(self):
+        """7. Injected failure moving lkg_tmp -> lkg_dir; verify target V1 and LKG V1 restored byte-for-byte."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+        v1_lkg_snap = self._snapshot_directory(self.lkg_dir)
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+
+        original_move = shutil.move
+
+        def mock_move(src, dst):
+            if src == self.mgr.lkg_tmp and dst == self.lkg_dir:
+                raise OSError("Injected IO failure promoting lkg_tmp to lkg_dir")
+            return original_move(src, dst)
+
+        with patch("shutil.move", side_effect=mock_move):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+
+        self.assertEqual(v1_target_snap, self._snapshot_directory(self.target_dir))
+        self.assertEqual(v1_lkg_snap, self._snapshot_directory(self.lkg_dir))
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
+
+    def test_failure_injection_8_lkg_swap_cleanup_no_split_brain(self):
+        """8. Reproduction test: Injected failure cleaning lkg_swap post-commit must NOT cause split-brain (Target=V2, LKG=V2)."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+        v2_staging_snap = self._snapshot_directory(self.staging_dir)
+
+        original_rmtree = shutil.rmtree
+
+        def mock_rmtree(path, ignore_errors=False):
+            if path == self.mgr.lkg_swap:
+                raise OSError("Injected permission error during post-commit lkg_swap cleanup")
+            return original_rmtree(path, ignore_errors=ignore_errors)
+
+        with patch("shutil.rmtree", side_effect=mock_rmtree):
+            success, errors = self.mgr.publish_from_staging()
+            # Must succeed because commit point was already reached
+            self.assertTrue(success)
+
+        # Assert BOTH target and LKG are on V2 (ZERO SPLIT-BRAIN)
+        target_snap = self._snapshot_directory(self.target_dir)
+        lkg_snap = self._snapshot_directory(self.lkg_dir)
+        self.assertEqual(target_snap, lkg_snap, "Target and LKG must have identical byte snapshot on V2")
+        self.assertEqual(v2_staging_snap, target_snap, "Target must be V2")
+
+    def test_failure_injection_9_target_swap_cleanup_no_split_brain(self):
+        """9. Injected failure cleaning swap_dir post-commit must NOT cause split-brain (Target=V2, LKG=V2)."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+        v2_staging_snap = self._snapshot_directory(self.staging_dir)
+
+        original_rmtree = shutil.rmtree
+
+        def mock_rmtree(path, ignore_errors=False):
+            if path == self.mgr.swap_dir:
+                raise OSError("Injected permission error during post-commit swap_dir cleanup")
+            return original_rmtree(path, ignore_errors=ignore_errors)
+
+        with patch("shutil.rmtree", side_effect=mock_rmtree):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertTrue(success)
+
+        target_snap = self._snapshot_directory(self.target_dir)
+        lkg_snap = self._snapshot_directory(self.lkg_dir)
+        self.assertEqual(target_snap, lkg_snap)
+        self.assertEqual(v2_staging_snap, target_snap)
+
+    def test_failure_injection_10_rollback_copy_failure(self):
+        """10. Injected failure during LKG rollback copy restores original target."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="aaaaaaaaaaaaaaaa")
         self.mgr.publish_from_staging()
-        lkg_snapshot = self._snapshot_directory(self.lkg_dir)
 
-        # 2. Manually corrupt target to test rollback
-        with open(os.path.join(self.target_dir, "manifest.json"), "w") as f:
-            f.write("corrupted manifest")
+        # Corrupt target
+        target_v1_snap = self._snapshot_directory(self.target_dir)
 
-        # 3. Successful rollback to LKG
-        success, msg = self.mgr.rollback_to_last_known_good()
-        self.assertTrue(success, f"Rollback failed: {msg}")
-        self.assertEqual(lkg_snapshot, self._snapshot_directory(self.target_dir))
+        with patch("shutil.copytree", side_effect=IOError("Injected failure during rollback copytree")):
+            success, msg = self.mgr.rollback_to_last_known_good()
+            self.assertFalse(success)
+
+        # Target restored to previous state
+        self.assertEqual(target_v1_snap, self._snapshot_directory(self.target_dir))
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+
+    def test_failure_injection_11_rollback_post_validation_failure(self):
+        """11. Injected validation failure during LKG restoration restores previous target."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="aaaaaaaaaaaaaaaa")
+        self.mgr.publish_from_staging()
+        target_v1_snap = self._snapshot_directory(self.target_dir)
+
+        original_verify = self.mgr._verify_directory
+
+        def mock_verify(dir_path):
+            if os.path.abspath(dir_path) == os.path.abspath(self.target_dir):
+                return False, ["Injected post-restoration target validation failure"]
+            return original_verify(dir_path)
+
+        with patch.object(self.mgr, "_verify_directory", side_effect=mock_verify):
+            success, msg = self.mgr.rollback_to_last_known_good()
+            self.assertFalse(success)
+
+        self.assertEqual(target_v1_snap, self._snapshot_directory(self.target_dir))
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
 
 
 if __name__ == "__main__":

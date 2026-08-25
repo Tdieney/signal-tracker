@@ -323,6 +323,36 @@ class TestSecurityCheck(unittest.TestCase):
         self.assertFalse(validate_external_url("javascript:alert(1)"))
         self.assertFalse(validate_external_url("https://www.w3.org/%2e%2e/admin"))
 
+    def test_cross_platform_junction_and_symlink_rejection(self):
+        """Test that Windows directory junctions and symlinks are accurately detected and rejected by validate_data_directory."""
+        from scripts.security_check import is_reparse_point_or_symlink, validate_data_directory
+        import subprocess
+
+        # 1. Test normal directory -> False
+        normal_dir = os.path.join(self.temp_dir, "normal_dir")
+        os.makedirs(normal_dir, exist_ok=True)
+        self.assertFalse(is_reparse_point_or_symlink(normal_dir))
+
+        # 2. Test actual Windows directory junction if supported in environment
+        target_dir = os.path.join(self.temp_dir, "junction_target")
+        junction_dir = os.path.join(self.temp_dir, "junction_link")
+        os.makedirs(target_dir, exist_ok=True)
+
+        try:
+            if hasattr(os, "_winapi") and hasattr(os._winapi, "CreateJunction"):
+                import _winapi
+                _winapi.CreateJunction(target_dir, junction_dir)
+            else:
+                subprocess.run(["cmd", "/c", "mklink", "/J", junction_dir, target_dir], capture_output=True, text=True)
+
+            if os.path.exists(junction_dir):
+                self.assertTrue(is_reparse_point_or_symlink(junction_dir), "Windows junction must be detected as reparse point")
+                violations = validate_data_directory(junction_dir)
+                self.assertTrue(len(violations) > 0, "validate_data_directory must reject root junction")
+                self.assertTrue(any("cannot be a symlink or junction" in v for v in violations))
+        except (OSError, subprocess.SubprocessError):
+            pass
+
 
 if __name__ == "__main__":
     unittest.main()

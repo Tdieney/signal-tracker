@@ -15,6 +15,7 @@ from pipeline.providers.base import (
     safe_date_label,
     safe_symbol_label,
 )
+from pipeline.validation import validate_record
 
 logger = logging.getLogger("vn_stock_signal.company_api_provider")
 
@@ -132,14 +133,13 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
                     raw_items = None
 
             if raw_items is None:
-                warnings.append(f"Failed to fetch data for symbol {sym_label} after {attempts_executed} attempt(s)")
+                warnings.append(f"Failed to fetch data from API after {attempts_executed} attempt(s)")
                 continue
 
             for item in raw_items:
                 input_rows += 1
                 try:
                     raw_date = str(item.get("trading_date") or item.get("date") or "")
-                    date_label = safe_date_label(raw_date)
                     open_val = float(item["open"])
                     high_val = float(item["high"])
                     low_val = float(item["low"])
@@ -151,11 +151,11 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
 
                     if not (open_val > 0 and high_val > 0 and low_val > 0 and close_val > 0 and vol_val >= 0):
                         rejected_rows += 1
-                        warnings.append(f"Non-positive OHLC price or invalid volume for symbol {sym_label} on date {date_label}")
+                        warnings.append("Non-positive OHLC price or invalid volume rejected")
                         continue
 
                     # Hash validated record data
-                    sha.update(f"{sym_label}:{date_label}:{open_val}:{high_val}:{low_val}:{close_val}:{vol_val}".encode("utf-8"))
+                    sha.update(f"{sym_label}:{raw_date}:{open_val}:{high_val}:{low_val}:{close_val}:{vol_val}".encode("utf-8"))
 
                     rec = OHLCVRecord(
                         trading_date=raw_date,
@@ -168,11 +168,17 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
                         volume=vol_val,
                         in_vn30=vn30_val,
                     )
+                    is_valid, val_errs = validate_record(rec)
+                    if not is_valid:
+                        rejected_rows += 1
+                        warnings.append("Record failed data validation checks")
+                        continue
+
                     records.append(rec)
                     accepted_rows += 1
                 except (KeyError, ValueError, TypeError):
                     rejected_rows += 1
-                    warnings.append(f"Malformed price or volume record rejected for symbol {sym_label}")
+                    warnings.append("Malformed price or volume record rejected")
 
         return ProviderFetchResult(
             records=records,

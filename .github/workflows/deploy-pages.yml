@@ -21,12 +21,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Check Committed Whitespace
         run: |
-          if git rev-parse HEAD~1 >/dev/null 2>&1; then
-            git diff --check HEAD~1 HEAD
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Checking PR commit range: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+            git diff --check ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+          else
+            BEFORE_SHA="${{ github.event.before }}"
+            if [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE_SHA" 2>/dev/null; then
+              echo "Checking push commit range: $BEFORE_SHA..${{ github.sha }}"
+              git diff --check "$BEFORE_SHA" "${{ github.sha }}"
+            else
+              echo "Checking single commit HEAD: ${{ github.sha }}"
+              git show --check --format= "${{ github.sha }}"
+            fi
           fi
 
       # Pinned: actions/setup-python@v6.3.0 (Node 24 runtime)

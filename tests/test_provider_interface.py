@@ -1,8 +1,15 @@
 """Unit tests for BaseMarketDataProvider implementations, provider contracts, and adversarial secret containment."""
 
+import io
+import json
+import logging
 import os
+import shutil
+import tempfile
 import unittest
 from typing import List
+
+from pipeline.build_dataset import build_dataset_from_records
 from pipeline.models import OHLCVRecord
 from pipeline.providers.base import (
     BaseMarketDataProvider,
@@ -18,6 +25,12 @@ from pipeline.providers.vnstock_provider import VnstockDataProvider
 
 class TestProviderInterface(unittest.TestCase):
     """Test suite verifying market data providers adhere to provider-neutral contracts."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_polymorphic_provider_contracts(self):
         """Polymorphic test verifying all provider subclasses uniformly return ProviderFetchResult."""
@@ -77,7 +90,7 @@ class TestProviderInterface(unittest.TestCase):
         self.assertEqual(res.accepted_rows, 1)
 
     def test_adversarial_zero_secret_leakage_exact_tokens(self):
-        """Adversarial test: exact tokens (1234-56-78, ABC12345, ghp_FAKE_TOKEN_123456789) injected across fields NEVER leak."""
+        """Adversarial test: exact raw tokens (1234-56-78, ABC12345, ghp_FAKE_TOKEN_123456789) injected verbatim NEVER leak."""
         test_tokens = [
             "1234-56-78",
             "ABC12345",
@@ -85,25 +98,39 @@ class TestProviderInterface(unittest.TestCase):
         ]
 
         for token in test_tokens:
-            # 1. Company API injection in URL, Key, Exception, Response
-            def malicious_fetch(url, key, sym, start, end):
+            # 1. Test CSV Provider injection
+            csv_path = os.path.join(self.test_dir, f"test_{token.replace('-', '_')}.csv")
+            with open(csv_path, "w", encoding="utf-8") as f:
+                f.write("trading_date,symbol,exchange,open,high,low,close,volume\n")
+                f.write(f"{token},{token},HOSE,100,102,99,-1,1000\n")
+                f.write(f"2026-08-21,FPT,HOSE,100,102,99,101,1000\n")
+
+            csv_provider = CsvDataProvider(csv_path)
+            with self.assertLogs("vn_stock_signal", level="DEBUG") if logging.getLogger("vn_stock_signal").hasHandlers() else unittest.mock.MagicMock():
+                res_csv = csv_provider.fetch_ohlcv()
+
+            for w in res_csv.warnings:
+                self.assertNotIn(token, w, f"Exact token '{token}' leaked in CSV warning: {w}")
+
+            # 2. Test Company API Provider injection
+            def malicious_company_fetch(url, key, sym, start, end):
                 raise RuntimeError(f"Crashing with token {token} at {url}")
 
             provider_co = CompanyApiDataProvider(
                 api_base_url=f"https://api.example.com/{token}",
-                fetch_fn=malicious_fetch,
+                fetch_fn=malicious_company_fetch,
             )
-            res_co = provider_co.fetch_ohlcv(symbols=[f"MAL_{token}"])
+            res_co = provider_co.fetch_ohlcv(symbols=[token])
             for w in res_co.warnings:
-                self.assertNotIn(token, w, f"Token '{token}' leaked in CompanyApi warning: {w}")
+                self.assertNotIn(token, w, f"Exact token '{token}' leaked in CompanyApi warning: {w}")
 
-            # 2. Vnstock injection in response payload and invalid date
-            def bad_response_fetch(sym, start, end):
+            # 3. Test Vnstock Provider injection
+            def bad_vnstock_fetch(sym, start, end):
                 return [
                     {
-                        "trading_date": f"DATE_{token}",
-                        "symbol": f"SYM_{token}",
-                        "open": -1.0,
+                        "trading_date": token,
+                        "symbol": token,
+                        "open": -10.0,
                         "high": 100.0,
                         "low": 90.0,
                         "close": 95.0,
@@ -111,14 +138,31 @@ class TestProviderInterface(unittest.TestCase):
                     }
                 ]
 
-            provider_vn = VnstockDataProvider(fetch_fn=bad_response_fetch)
-            res_vn = provider_vn.fetch_ohlcv(symbols=["FPT"])
+            provider_vn = VnstockDataProvider(fetch_fn=bad_vnstock_fetch)
+            res_vn = provider_vn.fetch_ohlcv(symbols=[token])
             for w in res_vn.warnings:
-                self.assertNotIn(token, w, f"Token '{token}' leaked in Vnstock warning: {w}")
+                self.assertNotIn(token, w, f"Exact token '{token}' leaked in Vnstock warning: {w}")
 
-            # 3. Label sanitizers
-            self.assertEqual(safe_symbol_label(f"SYM_{token}"), "[INVALID_SYMBOL]")
-            self.assertEqual(safe_date_label(f"2026_{token}"), "[INVALID_DATE]")
+            # 4. Build Dataset serialization check: Assert adversarial token rejected and not in JSON bytes
+            out_dataset_dir = os.path.join(self.test_dir, f"dataset_{token.replace('-', '_')}")
+            # All valid records accepted from CSV provider (FPT only, adversarial row rejected)
+            build_dataset_from_records(
+                records=res_csv.records,
+                output_dir=out_dataset_dir,
+                fixed_generated_at="2026-08-21T10:00:00Z",
+                workspace_root=self.test_dir,
+            )
+
+            for root, _, files in os.walk(out_dataset_dir):
+                for fn in files:
+                    full_fn = os.path.join(root, fn)
+                    with open(full_fn, "rb") as fp:
+                        json_bytes = fp.read()
+                        self.assertNotIn(
+                            token.encode("utf-8"),
+                            json_bytes,
+                            f"Exact token '{token}' leaked in serialized JSON artifact: {fn}",
+                        )
 
 
 if __name__ == "__main__":

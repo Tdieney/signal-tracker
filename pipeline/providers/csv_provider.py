@@ -14,6 +14,7 @@ from pipeline.providers.base import (
     safe_date_label,
     safe_symbol_label,
 )
+from pipeline.validation import validate_record
 
 
 class CsvDataProvider(BaseMarketDataProvider):
@@ -106,7 +107,7 @@ class CsvDataProvider(BaseMarketDataProvider):
 
                     if not (open_str and high_str and low_str and close_str):
                         self.rejected_rows_count += 1
-                        self.parse_warnings.append(f"Row {row_idx}: Missing required OHLC price values for symbol {sym_label}")
+                        self.parse_warnings.append(f"Row {row_idx}: Missing required OHLC price values")
                         continue
 
                     open_val = float(open_str)
@@ -116,7 +117,7 @@ class CsvDataProvider(BaseMarketDataProvider):
                     volume_val = int(float(vol_str)) if vol_str else 0
                 except (ValueError, TypeError):
                     self.rejected_rows_count += 1
-                    self.parse_warnings.append(f"Row {row_idx}: Non-numeric OHLC price or volume field for symbol {sym_label}")
+                    self.parse_warnings.append(f"Row {row_idx}: Non-numeric OHLC price or volume field")
                     continue
 
                 adj_close_str = cleaned_row.get("adjusted_close") or cleaned_row.get("adj_close")
@@ -125,7 +126,7 @@ class CsvDataProvider(BaseMarketDataProvider):
                     try:
                         adj_close = float(adj_close_str)
                     except (ValueError, TypeError):
-                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional adjusted_close field for symbol {sym_label}")
+                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional adjusted_close field")
 
                 val_str = cleaned_row.get("trading_value") or cleaned_row.get("value")
                 trading_val = None
@@ -133,7 +134,7 @@ class CsvDataProvider(BaseMarketDataProvider):
                     try:
                         trading_val = float(val_str)
                     except (ValueError, TypeError):
-                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional trading_value field for symbol {sym_label}")
+                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional trading_value field")
 
                 vn30_str = cleaned_row.get("in_vn30", "").lower()
                 in_vn30 = vn30_str in ("true", "1", "yes", "t")
@@ -151,6 +152,13 @@ class CsvDataProvider(BaseMarketDataProvider):
                     trading_value=trading_val,
                     in_vn30=in_vn30,
                 )
+
+                is_valid, val_errs = validate_record(rec)
+                if not is_valid:
+                    self.rejected_rows_count += 1
+                    self.parse_warnings.append(f"Row {row_idx}: Record failed data validation checks")
+                    continue
+
                 records.append(rec)
 
         accepted_count = len(records)

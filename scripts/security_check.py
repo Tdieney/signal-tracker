@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import stat
 import sys
 import urllib.parse
 from typing import Any, Dict, List, Set, Tuple
@@ -811,6 +812,27 @@ def scan_source_for_secrets(root_dir: str) -> List[str]:
     return violations
 
 
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+def is_reparse_point_or_symlink(path: str) -> bool:
+    """Check if a path is a POSIX symlink, Windows symlink, directory junction, or reparse point across all Python versions."""
+    try:
+        if os.path.islink(path):
+            return True
+        if hasattr(os.path, "isjunction") and os.path.isjunction(path):
+            return True
+        if hasattr(os, "lstat"):
+            st = os.lstat(path)
+            if hasattr(st, "st_file_attributes") and bool(st.st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT):
+                return True
+            if stat.S_ISLNK(st.st_mode):
+                return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def validate_data_directory(data_dir: str) -> List[str]:
     """Validate a standalone data directory (e.g. staging or public/data) against deep JSON schemas and security patterns."""
     violations: List[str] = []
@@ -818,7 +840,7 @@ def validate_data_directory(data_dir: str) -> List[str]:
     if not os.path.isdir(abs_dir):
         return [f"Data directory does not exist: {data_dir}"]
 
-    if os.path.islink(abs_dir):
+    if is_reparse_point_or_symlink(abs_dir):
         return [f"Data directory cannot be a symlink or junction: {data_dir}"]
 
     manifest_path = os.path.join(abs_dir, "manifest.json")
@@ -843,18 +865,23 @@ def validate_data_directory(data_dir: str) -> List[str]:
     expected_schema = None
     screener_symbols: Set[str] = set()
 
-    for root, dirs, files in os.walk(abs_dir):
+    for root, dirs, files in os.walk(abs_dir, followlinks=False):
+        # Filter and reject directory junctions / symlinks before os.walk descends
+        disallowed_dirs = []
         for d in dirs:
             dir_full = os.path.join(root, d)
-            if os.path.islink(dir_full):
+            if is_reparse_point_or_symlink(dir_full):
                 violations.append(f"Symlink or junction subdirectory forbidden in data directory: {dir_full}")
+                disallowed_dirs.append(d)
+        for d in disallowed_dirs:
+            dirs.remove(d)
 
         for f in files:
             full_path = os.path.join(root, f)
             rel_path = os.path.relpath(full_path, abs_dir).replace("\\", "/")
 
-            if os.path.islink(full_path):
-                violations.append(f"Symlink file forbidden in data directory: {rel_path}")
+            if is_reparse_point_or_symlink(full_path):
+                violations.append(f"Symlink or junction file forbidden in data directory: {rel_path}")
                 continue
 
             if not f.endswith(".json"):

@@ -5,6 +5,11 @@ import {
   createExactRequestFailedPredicate,
   isStandardBrowser404Console,
   isManifest404AllowedConsole,
+  createInvalidSymbolAllowedConsole,
+  isMalformedManifestAllowedConsole,
+  isUnsupportedSchemaAllowedConsole,
+  isMissingKeysAllowedConsole,
+  createDatasetIdMismatchAllowedConsole,
 } from './predicates';
 
 // Helper to attach CSP violation, console error, and request failure listeners with strict predicates
@@ -271,11 +276,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
       isAllowedRequestFailed: createExactRequestFailedPredicate('/data/symbols/UNKNOWNXYZ.json'),
-      isAllowedConsole: (text, locationUrl) =>
-        /Failed to load resource.*404/.test(text) ||
-        (locationUrl ? locationUrl.includes('UNKNOWNXYZ.json') : false) ||
-        text.includes('UNKNOWNXYZ.json') ||
-        text.includes('không tìm thấy'),
+      isAllowedConsole: createInvalidSymbolAllowedConsole('UNKNOWNXYZ'),
     });
 
     await page.goto('#/symbols/UNKNOWNXYZ');
@@ -440,9 +441,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Malformed manifest JSON renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) =>
-        text.includes('manifest.json') &&
-        /JSON|SyntaxError|Unexpected token|Lỗi kết nối khi tải|Không thể tải dữ liệu/.test(text),
+      isAllowedConsole: isMalformedManifestAllowedConsole,
     });
 
     await page.route('**/data/manifest.json', (route) =>
@@ -452,7 +451,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await page.goto('#/');
     const errorCard = page.locator('[data-testid="manifest-error"]');
     await expect(errorCard).toBeVisible();
-    await expect(page.locator('.metric-card')).toHaveCount(0);
+    await expect(page.locator('.stat-card, .metric-card')).toHaveCount(0);
 
     const cspViolations = await getCapturedCSPViolations(page);
     expect(cspViolations).toEqual([]);
@@ -462,9 +461,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Unsupported manifest schema version renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) =>
-        text.includes('manifest.json') &&
-        /Schema validation failed|Phiên bản dữ liệu không tương thích|Không đúng định dạng chuẩn/.test(text),
+      isAllowedConsole: isUnsupportedSchemaAllowedConsole,
     });
 
     await page.route('**/data/manifest.json', async (route) => {
@@ -477,7 +474,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await page.goto('#/');
     const errorCard = page.locator('[data-testid="manifest-error"]');
     await expect(errorCard).toBeVisible();
-    await expect(page.locator('.metric-card')).toHaveCount(0);
+    await expect(page.locator('.stat-card, .metric-card')).toHaveCount(0);
 
     const cspViolations = await getCapturedCSPViolations(page);
     expect(cspViolations).toEqual([]);
@@ -487,9 +484,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Manifest missing required keys renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) =>
-        text.includes('manifest.json') &&
-        /Schema validation failed|Không đúng định dạng chuẩn/.test(text),
+      isAllowedConsole: isMissingKeysAllowedConsole,
     });
 
     await page.route('**/data/manifest.json', (route) =>
@@ -499,7 +494,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await page.goto('#/');
     const errorCard = page.locator('[data-testid="manifest-error"]');
     await expect(errorCard).toBeVisible();
-    await expect(page.locator('.metric-card')).toHaveCount(0);
+    await expect(page.locator('.stat-card, .metric-card')).toHaveCount(0);
 
     const cspViolations = await getCapturedCSPViolations(page);
     expect(cspViolations).toEqual([]);
@@ -509,7 +504,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Overview dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) => text.includes('overview.json') && text.includes('dataset_id mismatch'),
+      isAllowedConsole: createDatasetIdMismatchAllowedConsole('/data/overview.json'),
     });
 
     await page.route('**/data/overview.json', async (route) => {
@@ -532,7 +527,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Screener dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) => text.includes('screener.json') && text.includes('dataset_id mismatch'),
+      isAllowedConsole: createDatasetIdMismatchAllowedConsole('/data/screener.json'),
     });
 
     await page.route('**/data/screener.json', async (route) => {
@@ -555,7 +550,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Symbol Detail dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) => text.includes('FPT.json') && text.includes('dataset_id mismatch'),
+      isAllowedConsole: createDatasetIdMismatchAllowedConsole('/data/symbols/FPT.json'),
     });
 
     await page.route('**/data/symbols/FPT.json', async (route) => {
@@ -599,7 +594,16 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     expect(cspViolations.length).toBeGreaterThan(0);
     expect(cspViolations[0]).toContain("script-src");
 
-    // 2. Injected unexpected console error containing common keywords to test strict allow-list containment
+    // 2. Direct unit testing of pure predicates against unexpected negative control errors
+    const fake404 = 'UNEXPECTED_ERROR: Failed to load resource 404 in manifest.json';
+    expect(isManifest404AllowedConsole(fake404, 'https://example.com/other')).toBe(false);
+    expect(createInvalidSymbolAllowedConsole('FPT')(fake404, 'https://example.com/other')).toBe(false);
+    expect(isMalformedManifestAllowedConsole('UNEXPECTED: SyntaxError in other.json', 'https://example.com/other.json')).toBe(false);
+    expect(isUnsupportedSchemaAllowedConsole('UNEXPECTED: Schema error', 'https://example.com/other.json')).toBe(false);
+    expect(isMissingKeysAllowedConsole('UNEXPECTED: Missing key', 'https://example.com/other.json')).toBe(false);
+    expect(createDatasetIdMismatchAllowedConsole('/data/overview.json')('UNEXPECTED: mismatch in screener', 'https://example.com/data/screener.json')).toBe(false);
+
+    // 3. Injected unexpected console error containing common keywords to test strict allow-list containment
     await page.evaluate(() => {
       console.error('UNEXPECTED_NEGATIVE_CONTROL_ERROR: Injected runtime crash 404 in manifest.json');
     });

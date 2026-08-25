@@ -10,7 +10,7 @@ from typing import List, Set, Tuple
 from pipeline.models import OHLCVRecord, QualityInfo, QualityStatus
 
 
-SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{1,10}$")
+SYMBOL_PATTERN = re.compile(r"^[A-Z]{3}$")
 VALID_EXCHANGES = {"HOSE", "HNX", "UPCOM"}
 
 
