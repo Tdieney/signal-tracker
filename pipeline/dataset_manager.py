@@ -300,9 +300,24 @@ class DatasetManager:
             if not target_valid:
                 # Rollback restoration
                 if os.path.exists(self.target_dir):
-                    shutil.rmtree(self.target_dir, ignore_errors=True)
+                    try:
+                        if is_reparse_point_or_symlink(self.target_dir):
+                            os.unlink(self.target_dir)
+                        else:
+                            shutil.rmtree(self.target_dir)
+                    except Exception:
+                        pass
+
+                if os.path.exists(self.target_dir):
+                    logger.error("Partial target directory could not be removed; keeping swap recovery intact without moving.")
+                    return False, "LKG rollback failed: partial target directory could not be removed for recovery"
+
                 if had_target and os.path.exists(self.swap_dir):
-                    shutil.move(self.swap_dir, self.target_dir)
+                    try:
+                        shutil.move(self.swap_dir, self.target_dir)
+                    except Exception as restore_ex:
+                        logger.error(f"Failed to restore original target from swap during rollback failure: {restore_ex}")
+                        return False, "LKG rollback failed and target restoration failed"
                 return False, f"Target verification failed after LKG restoration: {target_errors}"
 
             if os.path.exists(self.swap_dir):
@@ -322,15 +337,19 @@ class DatasetManager:
                         os.unlink(self.target_dir)
                     else:
                         shutil.rmtree(self.target_dir)
-                except Exception:
-                    pass
+                except Exception as ex_rm:
+                    logger.warning(f"Failed to remove partial target during rollback recovery: {ex_rm}")
+
+            if os.path.exists(self.target_dir):
+                logger.error("Partial target directory could not be removed; keeping swap recovery intact without moving.")
+                return False, "LKG rollback failed: partial target directory could not be removed for recovery"
 
             if had_target and os.path.exists(self.swap_dir):
                 try:
                     shutil.move(self.swap_dir, self.target_dir)
                 except Exception as restore_ex:
                     logger.error(f"Failed to restore original target from swap during rollback failure: {restore_ex}")
-                    return False, f"LKG rollback failed and target restoration failed: {restore_ex}"
+                    return False, "LKG rollback failed and target restoration failed"
 
             if os.path.exists(self.swap_dir):
                 try:
@@ -341,4 +360,4 @@ class DatasetManager:
                 except Exception:
                     pass
 
-            return False, f"LKG rollback failed: {e}"
+            return False, "LKG rollback failed"

@@ -1210,3 +1210,69 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Guaranteed structural safety during LKG rollback with zero directory nesting risk.
   - Fail-closed error filtering in Playwright preventing false positives.
 - Remaining work: Stage explicit modified files, commit and push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and verify live Pages deployment.
+
+---
+
+## 2026-08-25T19:20:00+07:00 — agy-20260825-phase2-rollback-partial-target-and-url-origin-parser — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Closure of 2 edge cases:
+  1. Rollback failure while partial target cannot be removed:
+     - In `rollback_to_last_known_good()` error handling, verify `target_dir` does not exist before moving `swap_dir`.
+     - If partial `target_dir` cleanup fails or is a no-op, do NOT move/nest `swap_dir` into `target_dir`. Keep `swap_dir` intact containing the original target byte-for-byte and return fixed sanitized error (`False, "LKG rollback failed: partial target directory could not be removed for recovery"`).
+     - If `target_dir` was cleanly removed, restore by moving `swap_dir` -> `target_dir` only when destination is confirmed not to exist. Verify target and verify no nested paths.
+     - If restore move fails, keep `swap_dir` intact for manual recovery and return sanitized error without raw exception/path interpolation.
+     - Add regression tests: (A) partial copytree failure + partial cleanup raise; (B) partial cleanup no-op; (C) partial copy failure + cleanup success restores byte-for-byte; (D) restore move failure leaves swap intact.
+  2. Parse trusted origins correctly:
+     - Replace regex `isTrustedOrigin` with real `URL` parser (`new URL(url)`).
+     - Protocol must be `http:` or `https:`.
+     - Hostname must be exact match of: `localhost`, `127.0.0.1`, `::1`, `tdieney.github.io`.
+     - Allow port on localhost.
+     - Reject malformed URLs, credentials spoof, subdomain/suffix spoofs (`tdieney.github.io.evil.com`, `localhost.evil.com`, `tdieney.github.io@evil.com`), and non-http/https protocols.
+     - Add unit tests verifying `false` for spoofed URLs and `true` for exact localhost and `https://tdieney.github.io`.
+- Planned Files:
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `frontend/e2e/predicates.ts` [MODIFY]
+  - `frontend/src/test/predicates.spec.ts` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+- Pre-existing working tree state: Exact commit `57f4b3f71b635ca61f20f479d42757853fb536ad`, untracked diagnostics `error.png`, `logs_88886054015.zip`, `logs_88886054015/` preserved.
+
+---
+
+## 2026-08-25T19:22:00+07:00 — agy-20260825-phase2-rollback-partial-target-and-url-origin-parser — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Closure of 2 edge cases (rollback partial target removal guard & robust URL origin parser).
+- Summary of changes:
+  1. **Fail-Closed Rollback Recovery on Partial Target Removal Failure (`pipeline/dataset_manager.py`)**:
+     - Hardened `rollback_to_last_known_good()` exception handling to verify `target_dir` does not exist before executing `shutil.move(swap_dir, target_dir)`.
+     - When partial target cleanup fails or is a no-op, `swap_dir` is NOT moved into `target_dir` (preventing corrupted nested directory paths).
+     - `swap_dir` remains intact with the original target snapshot byte-for-byte for retry or manual recovery.
+     - Returns fixed sanitized error `False, "LKG rollback failed: partial target directory could not be removed for recovery"` with zero raw filesystem exception or path interpolation.
+     - Added comprehensive regression tests in `tests/test_dataset_manager.py`: (A) partial copytree failure + partial cleanup raise; (B) partial cleanup no-op; (D) restore move failure preserves swap intact.
+  2. **Robust URL-Based Trusted Origin Parser (`frontend/e2e/predicates.ts`, `frontend/src/test/predicates.spec.ts`)**:
+     - Replaced regex with standard `new URL(rawUrl)` parser.
+     - Validates `http:` / `https:` protocol and exact allowed hostnames (`localhost`, `127.0.0.1`, `::1`, `[::1]`, `tdieney.github.io`).
+     - Rejects credentials injection (`user:pass@`), subdomain/suffix spoofs (`tdieney.github.io.evil.com`, `localhost.evil.com`, `tdieney.github.io@evil.com`), invalid protocols (`file:`, `javascript:`), and malformed strings.
+     - Added 10 unit test assertions in `frontend/src/test/predicates.spec.ts` confirming all spoofing vectors return `false` and valid local/Pages URLs return `true`.
+- Files Changed:
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `frontend/e2e/predicates.ts` [MODIFY]
+  - `frontend/src/test/predicates.spec.ts` [MODIFY]
+  - `tests/test_dataset_manager.py` [MODIFY]
+  - `DEVELOPER_LOG.md` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python scratch/repro_check.py`: 3/3 reproductions passed.
+  - `python -m unittest discover tests -v`: 70 unit tests (69 passed, 1 skipped for OS permission).
+  - `npm.cmd --prefix frontend test -- --run`: 38 Vitest unit tests passed across 6 test files.
+  - `npm.cmd --prefix frontend run typecheck`: 0 TypeScript errors.
+  - `npm.cmd --prefix frontend run build:pages`: Static production build succeeded.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 violations.
+  - `npm.cmd --prefix frontend audit --audit-level=high`: 0 vulnerabilities.
+  - `npm.cmd --prefix frontend run test:e2e`: 104 passed, 4 skipped across 6 browser configurations.
+  - `python scripts/build_all.py`: All 10 steps passed with code 0.
+  - `git diff --check`: 0 trailing whitespace warnings.
+- Safety & Security Impact:
+  - Guaranteed preservation of original target snapshot in swap during compound rollback failures.
+  - Strict RFC-compliant origin parser rejecting all URL spoofing vectors.
+- Remaining work: Stage explicit modified files, commit and push to `origin/main`, monitor CI and Deploy workflows on GitHub Actions, and verify live Pages deployment.

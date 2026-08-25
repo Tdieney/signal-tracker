@@ -1,6 +1,6 @@
 /**
  * Pure, modular, and unit-tested predicate functions for Playwright E2E and console error filtering.
- * All predicates use exact equality or strictly anchored regex patterns (^ and $), and validate trusted origins.
+ * All predicates use exact equality or strictly anchored regex patterns (^ and $), and validate trusted origins via URL parser.
  */
 
 export interface PageListenerFilter {
@@ -9,12 +9,33 @@ export interface PageListenerFilter {
   isAllowedRequestFailed?: (url: string, errorText?: string) => boolean;
 }
 
-const isTrustedOrigin = (url?: string): boolean => {
-  if (!url) return true;
-  if (/^https?:\/\/(?!localhost|127\.0\.0\.1|tdieney\.github\.io)/i.test(url)) {
+const TRUSTED_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]', 'tdieney.github.io']);
+
+/**
+ * Validates whether a given URL has a trusted protocol, hostname, and origin structure.
+ * Rejects credentials spoofing (user:pass@), subdomain/suffix spoofing, non-http/https protocols, and malformed URLs.
+ */
+export const isTrustedOrigin = (rawUrl?: string): boolean => {
+  if (!rawUrl) return true;
+  try {
+    const parsed = new URL(rawUrl);
+    // Protocol must strictly be http: or https:
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    // Reject credentials in URL
+    if (parsed.username || parsed.password) {
+      return false;
+    }
+    // Exact hostname match
+    if (!TRUSTED_HOSTNAMES.has(parsed.hostname)) {
+      return false;
+    }
+    return true;
+  } catch {
+    // Malformed URLs are rejected
     return false;
   }
-  return true;
 };
 
 /**

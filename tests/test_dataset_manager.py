@@ -597,12 +597,103 @@ class TestDatasetManager(unittest.TestCase):
                 return False, ["Injected post-restoration target validation failure"]
             return original_verify(dir_path)
 
-        with patch.object(self.mgr, "_verify_directory", side_effect=mock_verify):
+    def test_rollback_partial_copytree_cleanup_failure_preserves_swap_byte_for_byte(self):
+        """A. Injected copytree failure creating partial target where cleanup raises preserves swap_dir byte-for-byte without nesting."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_target_snap = self._snapshot_directory(self.target_dir)
+
+        # Update target with V2
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+        self.mgr.publish_from_staging()
+        v2_target_snap = self._snapshot_directory(self.target_dir)
+
+        def failing_copytree(src, dst):
+            os.makedirs(dst, exist_ok=True)
+            with open(os.path.join(dst, "partial.txt"), "w", encoding="utf-8") as f:
+                f.write("partial content")
+            raise IOError("Injected copytree failure after writing partial target")
+
+        original_rmtree = shutil.rmtree
+
+        def failing_rmtree(path, ignore_errors=False):
+            if os.path.abspath(path) == os.path.abspath(self.target_dir):
+                raise IOError("Injected rmtree failure on partial target")
+            return original_rmtree(path, ignore_errors=ignore_errors)
+
+        with patch("shutil.copytree", side_effect=failing_copytree), patch("shutil.rmtree", side_effect=failing_rmtree):
             success, msg = self.mgr.rollback_to_last_known_good()
             self.assertFalse(success)
+            self.assertEqual(msg, "LKG rollback failed: partial target directory could not be removed for recovery")
 
-        self.assertEqual(target_v1_snap, self._snapshot_directory(self.target_dir))
-        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        # swap_dir still exists and contains the exact V2 target snapshot byte-for-byte
+        self.assertTrue(os.path.exists(self.mgr.swap_dir))
+        self.assertEqual(self._snapshot_directory(self.mgr.swap_dir), v2_target_snap)
+        # swap_dir is NOT nested under target_dir
+        self.assertFalse(os.path.exists(os.path.join(self.target_dir, os.path.basename(self.mgr.swap_dir))))
+
+    def test_rollback_partial_cleanup_noop_preserves_swap_byte_for_byte(self):
+        """B. Injected copytree failure where partial target cleanup is a no-op preserves swap_dir without nesting."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+        self.mgr.publish_from_staging()
+        v2_target_snap = self._snapshot_directory(self.target_dir)
+
+        def failing_copytree(src, dst):
+            os.makedirs(dst, exist_ok=True)
+            with open(os.path.join(dst, "partial.txt"), "w", encoding="utf-8") as f:
+                f.write("partial content")
+            raise IOError("Injected copytree failure after writing partial target")
+
+        original_rmtree = shutil.rmtree
+
+        def noop_rmtree(path, ignore_errors=False):
+            if os.path.abspath(path) == os.path.abspath(self.target_dir):
+                pass  # No-op, leaves target_dir intact
+            else:
+                original_rmtree(path, ignore_errors=ignore_errors)
+
+        with patch("shutil.copytree", side_effect=failing_copytree), patch("shutil.rmtree", side_effect=noop_rmtree):
+            success, msg = self.mgr.rollback_to_last_known_good()
+            self.assertFalse(success)
+            self.assertEqual(msg, "LKG rollback failed: partial target directory could not be removed for recovery")
+
+        self.assertTrue(os.path.exists(self.mgr.swap_dir))
+        self.assertEqual(self._snapshot_directory(self.mgr.swap_dir), v2_target_snap)
+        self.assertFalse(os.path.exists(os.path.join(self.target_dir, os.path.basename(self.mgr.swap_dir))))
+
+    def test_rollback_restore_move_failure_preserves_swap(self):
+        """D. Injected failure during restore move leaves swap_dir intact with original target for retry/manual recovery."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+        self.mgr.publish_from_staging()
+        v2_target_snap = self._snapshot_directory(self.target_dir)
+
+        original_move = shutil.move
+
+        def failing_restore_move(src, dst):
+            if os.path.abspath(src) == os.path.abspath(self.mgr.swap_dir) and os.path.abspath(dst) == os.path.abspath(self.target_dir):
+                raise IOError("Injected move failure during target restore")
+            return original_move(src, dst)
+
+        with patch("shutil.copytree", side_effect=IOError("Injected copytree failure")), patch("shutil.move", side_effect=failing_restore_move):
+            success, msg = self.mgr.rollback_to_last_known_good()
+            self.assertFalse(success)
+            self.assertEqual(msg, "LKG rollback failed and target restoration failed")
+
+        # Recovery swap remains intact with original V2 target snapshot
+        self.assertTrue(os.path.exists(self.mgr.swap_dir))
+        self.assertEqual(self._snapshot_directory(self.mgr.swap_dir), v2_target_snap)
 
 
 if __name__ == "__main__":
