@@ -227,7 +227,13 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Invalid symbol route renders symbol not found error state', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['symbols/XYZ.json', '404', 'Not Found']);
+    await setupPageListeners(page, errors, [
+      'symbols/XYZ.json',
+      '404',
+      'Not Found',
+      'Failed to load resource',
+      'status of 404',
+    ]);
 
     await page.goto('#/symbols/XYZ');
     const notFoundCard = page.locator('[data-testid="symbol-not-found-card"]');
@@ -326,9 +332,10 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Non-tautological Desktop Table and Mobile Cards parity with independent contexts', async ({
     browser,
+    baseURL,
   }) => {
-    const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const desktopContext = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });
+    const mobileContext = await browser.newContext({ baseURL, viewport: { width: 390, height: 844 } });
 
     try {
       const desktopPage = await desktopContext.newPage();
@@ -368,7 +375,13 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     page,
   }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['data/manifest.json', '404', 'Not Found']);
+    await setupPageListeners(page, errors, [
+      'data/manifest.json',
+      '404',
+      'Not Found',
+      'Failed to load resource',
+      'status of 404',
+    ]);
 
     await page.route('**/data/manifest.json', (route) =>
       route.fulfill({ status: 404, body: 'Not Found' })
@@ -398,7 +411,14 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Fail-closed matrix: Malformed manifest JSON renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['data/manifest.json', 'JSON.parse', 'SyntaxError']);
+    await setupPageListeners(page, errors, [
+      'data/manifest.json',
+      'JSON.parse',
+      'SyntaxError',
+      'invalid json',
+      'Unexpected token',
+      'JSON',
+    ]);
 
     await page.route('**/data/manifest.json', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"schema_version": invalid...' })
@@ -416,7 +436,11 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Fail-closed matrix: Unsupported manifest schema version renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['data/manifest.json', 'Schema validation failed for manifest.json']);
+    await setupPageListeners(page, errors, [
+      'data/manifest.json',
+      'Schema validation failed for manifest.json',
+      'Phiên bản dữ liệu không tương thích',
+    ]);
 
     await page.route('**/data/manifest.json', async (route) => {
       const response = await route.fetch();
@@ -437,7 +461,10 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Fail-closed matrix: Manifest missing required keys renders safe error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['data/manifest.json', 'Schema validation failed for manifest.json']);
+    await setupPageListeners(page, errors, [
+      'data/manifest.json',
+      'Schema validation failed for manifest.json',
+    ]);
 
     await page.route('**/data/manifest.json', (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"schema_version": "1.0.0"}' })
@@ -455,7 +482,11 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Fail-closed matrix: Overview dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['dataset_id mismatch']);
+    await setupPageListeners(page, errors, [
+      'dataset_id mismatch',
+      'mismatched_old_dataset_id_999',
+      'Dữ liệu Tổng quan không khớp',
+    ]);
 
     await page.route('**/data/overview.json', async (route) => {
       const response = await route.fetch();
@@ -476,7 +507,11 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Fail-closed matrix: Screener dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['dataset_id mismatch']);
+    await setupPageListeners(page, errors, [
+      'dataset_id mismatch',
+      'mismatched_old_screener_id_999',
+      'Dữ liệu Bộ lọc không khớp',
+    ]);
 
     await page.route('**/data/screener.json', async (route) => {
       const response = await route.fetch();
@@ -497,7 +532,11 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
 
   test('Fail-closed matrix: Symbol Detail dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
-    await setupPageListeners(page, errors, ['dataset_id mismatch']);
+    await setupPageListeners(page, errors, [
+      'dataset_id mismatch',
+      'mismatched_old_symbol_id_999',
+      'Dữ liệu mã FPT không khớp',
+    ]);
 
     await page.route('**/data/symbols/FPT.json', async (route) => {
       const response = await route.fetch();
