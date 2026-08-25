@@ -45,6 +45,11 @@ jobs:
         run: |
           npm ci
 
+      - name: Frontend Dependency Security Audit
+        working-directory: frontend
+        run: |
+          npm audit --audit-level=high
+
       - name: Install Playwright Browsers
         working-directory: frontend
         run: |

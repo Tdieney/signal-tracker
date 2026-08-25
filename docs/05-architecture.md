@@ -4,18 +4,45 @@
 
 ```mermaid
 flowchart LR
-  P[Market Data Provider\nCSV / Vnstock / Company API] --> V[Validate + Normalize\nRow Accounting]
-  V --> I[Indicators + Signals\nPure Functions]
-  I --> S[Staging Directory\n.staging_data]
-  S --> D[Dataset Manager\nDeep Verify & LKG Backup]
-  D --> J[Versioned Public JSON\nfrontend/public/data]
-  J --> F[React Static App\nStrict Zod Schemas]
-  F --> G[GitHub Pages\nStrict CSP Meta]
+  subgraph DataPipeline["Provider-Neutral Pipeline"]
+    P["Market Data Provider\n(CSV / Vnstock / Company API)"] --> V["Validate + Normalize\n(Row & Invariant Accounting)"]
+    V --> I["Indicators & Signals\n(MA10 & Market Breadth)"]
+    I --> F["Freshness Engine\n(Vietnam Trading Calendar)"]
+    F --> S["Staging Directory\n(.staging_data)"]
+    S --> DM["Dataset Manager\n(Atomic Swap & LKG Backup)"]
+  end
+
+  subgraph Distribution["Static Hosting & Security"]
+    DM --> J["Versioned Public JSON\n(frontend/public/data)"]
+    J --> R["React Static App\n(Strict Zod Schemas)"]
+    R --> GP["GitHub Pages Live\n(Strict CSP Meta)"]
+  end
 ```
 
-GitHub Actions chạy pipeline và build; browser chỉ tải static assets/JSON. Không có secret, Python hay provider call trong browser.
+GitHub Actions chạy pipeline và build; browser chỉ tải static assets/JSON. Không có secret, Python hay direct provider call trong browser.
 
-## 2. Cấu trúc repo mục tiêu
+---
+
+## 2. Phân biệt các tầng kiến trúc
+
+### A. Provider-Neutral Scaffolding
+- Cung cấp giao diện chuẩn hóa `BaseMarketDataProvider` với `fetch_ohlcv(...) -> ProviderFetchResult` và `health_check() -> ProviderHealth`.
+- Đảm bảo tính toán indicators (MA10, Volume 20D), market breadth và signal classification hoàn toàn độc lập với nhà cung cấp dữ liệu.
+- Mặc định an toàn của dự án là **CSV fixture demo mode** với trạng thái phiên và freshness `UNKNOWN` (không giả mạo dữ liệu live).
+
+### B. Configured Live Provider (Tùy chọn khi cấu hình)
+- **`VnstockDataProvider`**: Adapter cho dữ liệu thị trường Việt Nam với rate-limiting, retry loop thực tế, containment timeout, và kiểm tra giá đóng cửa dương.
+- **`CompanyApiDataProvider`**: Adapter cho API doanh nghiệp có xác thực. Tải endpoint và API key trực tiếp từ biến môi trường (`DATA_API_KEY`, `DATA_API_BASE_URL`).
+- **Nguyên tắc bảo mật Zero Secret Leakage**: Tuyệt đối không đưa API token, bearer headers, raw payload, endpoint URL hoặc exception string vào log, parse warnings hoặc public JSON artifacts.
+
+### C. Cơ chế Fail-Safe & Deployment Preservation trên GitHub Pages
+- **Tính chất Ephemeral của GitHub Actions Runner**: Môi trường runner của GitHub Actions là tạm thời và được dọn dẹp sau mỗi run; thư mục `.lkg_data` cục bộ không tồn tại xuyên suốt giữa các workflow độc lập.
+- **Production Fail-Safe Mặc định**: Khi pipeline fetch, validation hoặc security scanner phát hiện lỗi, workflow CI/CD sẽ dừng ngay lập tức (`exit 1`) và không tạo pages artifact. GitHub Pages tự động bảo lưu phiên bản triển khai thành công trước đó (Previous-Deployment Preservation).
+- **Optional Persistent LKG**: Nếu cần lưu trữ Last-Known-Good bền vững qua các lần chạy định kỳ, có thể tích hợp với GitHub Actions Artifacts / Cache hoặc S3-compatible cold storage.
+
+---
+
+## 3. Cấu trúc repo
 
 ```text
 .
@@ -79,64 +106,63 @@ GitHub Actions chạy pipeline và build; browser chỉ tải static assets/JSON
 └── README.md
 ```
 
-## 3. Frontend boundaries
+---
 
-### Data layer
+## 4. Frontend Boundaries
 
-- `fetchJson(path, signal)` chịu trách nhiệm timeout/abort, HTTP check và parse.
-- Strict runtime Zod schema validation ở boundary trước khi data vào app state.
-- Manifest tải trước; các page data tải theo route.
-- Request detail được abort khi user đổi symbol/unmount.
-- Không retry vô hạn; tối đa một retry tự động cho lỗi mạng tạm thời, sau đó cho người dùng nút Retry.
+### Data Layer
+- `fetchJson(path, signal)` chịu trách nhiệm timeout/abort, HTTP status check và JSON parse.
+- Strict runtime Zod schema validation ở boundary trước khi data vào application state.
+- `manifest.json` tải trước; các file `overview.json`, `screener.json`, `symbols/*.json` tải theo route tương ứng.
+- Request symbol detail được tự động abort khi người dùng chuyển mã hoặc unmount view.
 
-### State
+### State & URL Sync
+- Server/static data: custom hooks và in-memory cache.
+- Filter, search query, sorting, pagination: URL hash query là Single Source of Truth.
+- Responsive Views: Desktop Table và Mobile Cards hiển thị cùng một canonical dataset.
 
-- Server/static data: custom hooks và in-memory cache; không cần global state library cồng kềnh.
-- Filter/sort/page: URL query hash là single source of truth.
-- Responsive views: Desktop Table và Mobile Cards render cùng canonical data source.
+### Routing
+- Sử dụng Hash Routing (`#/`, `#/screener`, `#/symbols/FPT`) để tương thích hoàn toàn với static hosting trên GitHub Pages.
+- Mọi asset/data path đều sử dụng `import.meta.env.BASE_URL` (`/signal-tracker/`).
 
-### Routing và GitHub Pages
+---
 
-- Dùng hash routing: `/#/screener` và `/#/symbols/FPT`.
-- Mọi asset/data path dùng `import.meta.env.BASE_URL` để chạy được ở project subpath.
-- `vite.config.ts` nhận base từ cấu hình deploy công khai, không phải secret.
-
-## 4. Pipeline boundaries & Provider Architecture
+## 5. Pipeline Boundaries & Contract Invariants
 
 ### Provider Interface (`pipeline/providers/base.py`)
+- `fetch_ohlcv(...) -> ProviderFetchResult`: trả về kết quả chuẩn hóa kèm đầy đủ hạch toán chất lượng:
+  $$\text{input\_rows} = \text{accepted\_rows} + \text{rejected\_rows}$$
+- `fetch_records(...) -> List[OHLCVRecord]`: method tiện lợi trả về danh sách bản ghi đã được validate.
+- `health_check() -> ProviderHealth`: kiểm tra khả năng kết nối non-destructive.
 
-```python
-class BaseMarketDataProvider(ABC):
-    @property
-    @abstractmethod
-    def provider_name(self) -> str: ...
+### Lịch giao dịch & Đánh giá Freshness (`pipeline/freshness.py`)
+- **Phạm vi hỗ trợ**: 2025–2027 (phiên bản `2026.1`, nguồn: Quy định giao dịch HOSE/HNX và Bộ luật Lao động Việt Nam).
+- **Nguyên tắc Fail-Closed**: Các ngày nằm ngoài phạm vi 2025–2027 đều được phân loại là không phải ngày giao dịch / trạng thái `UNKNOWN`.
+- **Điều kiện `CLOSED_CONFIRMED`**: Chỉ trả về `CLOSED_CONFIRMED` khi:
+  1. Đang chạy với live market data provider (`is_live_provider=True`);
+  2. Dữ liệu đã được cập nhật đầy đủ và hợp lệ (`has_complete_data=True`);
+  3. Thời gian tham chiếu đã qua mốc 15:30 (kết thúc phiên khớp lệnh định kỳ đóng cửa và thanh toán bù trừ) của một ngày giao dịch hợp lệ.
+- **Reference Time Injection**: Hỗ trợ truyền tham số `reference_time` để đảm bảo 100% tính lặp lại (reproducibility) trong kiểm thử và build cố định.
 
-    @abstractmethod
-    def fetch_ohlcv(self, symbols=None, start_date=None, end_date=None) -> ProviderFetchResult: ...
+### Staging & Dataset Manager (`pipeline/dataset_manager.py`)
+1. Tạo thư mục staging `.staging_data` sạch.
+2. Kiểm tra sâu toàn bộ file JSON, schema, enum, bất biến toán học và cross-file consistency.
+3. Kiểm tra ranh giới an toàn: thư mục staging, target, LKG và swap phải nằm hoàn toàn trong workspace và tách biệt nhau (disjoint).
+4. Atomic move staging $\rightarrow$ target. Nếu có lỗi xác thực sau khi move, tự động rollback về phiên bản trước mà không để lại orphan directories.
+5. Cập nhật bản sao `.lkg_data` để phục vụ khôi phục nhanh tại chỗ.
 
-    @abstractmethod
-    def health_check(self) -> ProviderHealth: ...
-```
+---
 
-- Provider chỉ fetch/map field và hạch toán số dòng (`input_rows`, `accepted_rows`, `rejected_rows`); không tự tính indicator hay signal.
-- Validation/normalization không phụ thuộc vendor cụ thể.
-- Indicator và signal là pure/deterministic functions.
+## 6. Security & Hardening Controls
 
-### Freshness, Trading Calendar & Session Status (`pipeline/freshness.py`)
-
-- `VietnamTradingCalendar`: kiểm tra ngày giao dịch thực tế trên thị trường chứng khoán Việt Nam (HOSE/HNX/UPCOM), loại trừ thứ Bảy, Chủ Nhật và các ngày nghỉ lễ theo quy định (Tết Nguyên Đán, Giỗ Tổ Hùng Vương 10/3 AL, 30/4–1/5, Quốc khánh 2/9, Tết Dương lịch 1/1).
-- `evaluate_market_session_status`: Xác định trạng thái phiên giao dịch (`CLOSED_CONFIRMED` khi sau 15:30 của ngày giao dịch chuẩn có dữ liệu xác thực, `UNKNOWN` trong phiên hoặc ở chế độ dữ liệu mẫu demo).
-- `evaluate_dataset_freshness`: Đánh giá `FRESH`, `STALE` hoặc `UNKNOWN`.
-
-### Staging & Last-Known-Good Rollback Engine (`pipeline/dataset_manager.py`)
-
-1. Build dataset vào thư mục staging tạm (`.staging_data`).
-2. Deep validate schema, cross-file consistency và dataset_id.
-3. Nếu hợp lệ: Atomic swap sang thư mục đích (`frontend/public/data`) và cập nhật bản sao Last-Known-Good (`.lkg_data`).
-4. Nếu upstream fetch hoặc build thất bại: Tự động phục hồi từ bản sao Last-Known-Good gần nhất để đảm bảo GitHub Pages luôn có dữ liệu an toàn phục vụ người dùng.
-
-## 5. Security & Configuration
-
-- Tuyệt đối không đặt secret hoặc API token vào frontend code hoặc `VITE_*` environment variables.
-- Tất cả secret (nếu có) được truyền qua GitHub Actions Secrets và chỉ truy cập trong backend pipeline step.
-- Content Security Policy (CSP) nghiêm ngặt với `default-src 'none'`, `script-src 'self'`, `style-src 'self' '<sha256>'`, `connect-src 'self'`, `img-src 'self' data:`.
+- Tuyệt đối không đặt secret, credential, token hoặc private endpoints vào frontend code, `VITE_*` variables, git history hoặc public artifacts.
+- Content Security Policy (CSP) nghiêm ngặt được cấu hình qua `<meta http-equiv="Content-Security-Policy">`:
+  - `default-src 'self'`
+  - `script-src 'self'`
+  - `style-src 'self' 'sha256-3pRED1tOXas1FXFoPb9TGCjmYe9XQsmO9OV23khV2nY='`
+  - `img-src 'self' data:`
+  - `font-src 'self'`
+  - `connect-src 'self'`
+  - `object-src 'none'`
+  - `base-uri 'self'`
+  - `form-action 'self'`

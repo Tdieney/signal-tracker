@@ -25,6 +25,7 @@ from pipeline.models import (
     OverviewData,
     ScreenerData,
 )
+from pipeline.providers.base import ProviderFetchResult
 from pipeline.providers.company_api_provider import CompanyApiDataProvider
 from pipeline.providers.csv_provider import CsvDataProvider
 from pipeline.providers.vnstock_provider import VnstockDataProvider
@@ -45,6 +46,8 @@ def compute_deterministic_dataset_id(
     quality_status: str = "PASS",
     eligible_count: int = 0,
     quality_metadata: dict | None = None,
+    market_session_status: str = "UNKNOWN",
+    freshness_status: str = "UNKNOWN",
 ) -> str:
     """Derive deterministic 16-hex dataset ID hash from canonical sorted representation of all pipeline inputs & public metrics."""
     canonical_data = {
@@ -54,6 +57,8 @@ def compute_deterministic_dataset_id(
         "quality_status": quality_status,
         "eligible_count": eligible_count,
         "quality_metadata": quality_metadata or {},
+        "market_session_status": market_session_status,
+        "freshness_status": freshness_status,
         "records": [
             [
                 r.symbol,
@@ -76,7 +81,7 @@ def compute_deterministic_dataset_id(
 
 
 def build_dataset_from_records(
-    records: list,
+    records: list | ProviderFetchResult,
     output_dir: str = "frontend/public/data",
     staging_dir: str | None = None,
     as_of_date: str | None = None,
@@ -85,14 +90,24 @@ def build_dataset_from_records(
     parse_errors_count: int = 0,
     parse_warnings: list | None = None,
     fixed_generated_at: str | None = None,
+    reference_time: datetime | None = None,
     workspace_root: str | None = None,
     source_rows_count: int | None = None,
     is_live_provider: bool = False,
 ) -> str:
-    """Build and serialize full dataset from normalized OHLCV records."""
+    """Build and serialize full dataset from normalized OHLCV records with injected reference time."""
+    if isinstance(records, ProviderFetchResult):
+        raw_records = records.records
+        parse_errors_count = parse_errors_count or records.rejected_rows
+        parse_warnings = parse_warnings or records.warnings
+        source_rows_count = source_rows_count or records.input_rows
+        provider_name = records.provider_name or provider_name
+    else:
+        raw_records = list(records)
+
     # 1. Normalize and validate with strict accounting
     accepted_records, quality_info = validate_and_normalize_records(
-        records,
+        raw_records,
         strict_duplicates=True,
         parse_errors_count=parse_errors_count,
         parse_warnings=parse_warnings,
@@ -117,9 +132,36 @@ def build_dataset_from_records(
     # 5. Fix quality eligible_symbols to exact breadth-eligible count
     quality_info.eligible_symbols = as_of_metric.eligible_count
 
-    # 6. Build Overview & Screener Data with canonical hash
-    now_dt = datetime.now(timezone.utc)
-    generated_at_str = fixed_generated_at or now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 6. Resolve deterministic reference time
+    ref_dt = reference_time
+    if ref_dt is None and fixed_generated_at:
+        try:
+            # Parse fixed ISO timestamp
+            clean_iso = fixed_generated_at.replace("Z", "+00:00")
+            ref_dt = datetime.fromisoformat(clean_iso)
+        except Exception:
+            ref_dt = None
+    if ref_dt is None:
+        ref_dt = datetime.now(timezone.utc)
+
+    generated_at_str = fixed_generated_at or ref_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # 7. Evaluate Session Status and Freshness with reference time injection
+    has_complete = (quality_info.status.value in ("PASS", "PARTIAL")) and len(accepted_records) > 0
+    session_status = evaluate_market_session_status(
+        as_of_date=target_as_of,
+        reference_time=ref_dt,
+        is_live_provider=is_live_provider,
+        has_complete_data=has_complete,
+    )
+    freshness_info = evaluate_dataset_freshness(
+        as_of_date=target_as_of,
+        reference_time=ref_dt,
+        is_live_provider=is_live_provider,
+        has_complete_data=has_complete,
+    )
+
+    # 8. Compute Canonical Dataset ID
     dataset_id = compute_deterministic_dataset_id(
         as_of_date=target_as_of,
         records=accepted_records,
@@ -133,6 +175,8 @@ def build_dataset_from_records(
             "rejected_rows": quality_info.rejected_rows,
             "warnings": quality_info.warnings,
         },
+        market_session_status=session_status.value,
+        freshness_status=freshness_info.status.value,
     )
 
     overview_data = OverviewData(
@@ -155,16 +199,13 @@ def build_dataset_from_records(
         items=screener_items,
     )
 
-    # 7. Build Symbol Details
+    # 9. Build Symbol Details
     symbol_details = {
         sym: build_symbol_detail(sym, indicators_by_symbol[sym], dataset_id, target_as_of)
         for sym in all_symbols
     }
 
-    # 8. Build Manifest with Truthful Semantics & Session Status
-    session_status = evaluate_market_session_status(now_dt, target_as_of, is_live_provider=is_live_provider)
-    freshness_info = evaluate_dataset_freshness(now_dt, target_as_of, is_live_provider=is_live_provider)
-
+    # 10. Build Manifest Data
     manifest_data = ManifestData(
         schema_version=SCHEMA_VERSION,
         dataset_id=dataset_id,
@@ -183,7 +224,7 @@ def build_dataset_from_records(
         quality=quality_info,
     )
 
-    # 9. Serialize & validate cross-file consistency atomically
+    # 11. Serialize & validate cross-file consistency atomically
     serialize_dataset(
         manifest=manifest_data,
         overview=overview_data,
@@ -206,20 +247,28 @@ def main() -> None:
     parser.add_argument("--as-of", default=None, help="Target as-of date (YYYY-MM-DD)")
     parser.add_argument("--universe", default="ALL", choices=["ALL", "VN30"], help="Universe name")
     parser.add_argument("--generated-at", default=None, help="Fixed ISO timestamp for deterministic test builds")
+    parser.add_argument("--reference-time", default=None, help="Fixed ISO reference time for freshness evaluation")
 
     args = parser.parse_args()
 
     if args.provider.lower() == "csv":
         provider = CsvDataProvider(args.input)
-        raw_result = provider.fetch_ohlcv_result()
+        raw_result = provider.fetch_ohlcv()
     elif args.provider.lower() == "vnstock":
         provider = VnstockDataProvider()
-        raw_result = provider.fetch_ohlcv_result()
+        raw_result = provider.fetch_ohlcv()
     else:
         provider = CompanyApiDataProvider()
-        raw_result = provider.fetch_ohlcv_result()
+        raw_result = provider.fetch_ohlcv()
 
     print(f"Processing {len(raw_result.records)} records from {args.provider} (input_rows={raw_result.input_rows})...")
+
+    ref_dt = None
+    if args.reference_time:
+        try:
+            ref_dt = datetime.fromisoformat(args.reference_time.replace("Z", "+00:00"))
+        except Exception:
+            ref_dt = None
 
     try:
         ds_id = build_dataset_from_records(
@@ -232,6 +281,7 @@ def main() -> None:
             parse_errors_count=raw_result.rejected_rows,
             parse_warnings=raw_result.warnings,
             fixed_generated_at=args.generated_at,
+            reference_time=ref_dt,
             source_rows_count=raw_result.input_rows,
             is_live_provider=(args.provider.lower() != "csv"),
         )

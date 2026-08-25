@@ -24,16 +24,16 @@ class TestCsvProvider(unittest.TestCase):
         self.assertTrue(os.path.exists(fixture_path))
 
         provider = CsvDataProvider(fixture_path)
-        records = provider.fetch_ohlcv()
+        records = provider.fetch_records()
         self.assertGreater(len(records), 0)
 
         # Filter by symbol
-        fpt_records = provider.fetch_ohlcv(symbols=["FPT"])
+        fpt_records = provider.fetch_records(symbols=["FPT"])
         self.assertTrue(all(r.symbol == "FPT" for r in fpt_records))
         self.assertGreater(len(fpt_records), 0)
 
         # Filter by date range
-        date_records = provider.fetch_ohlcv(start_date="2026-08-01", end_date="2026-08-15")
+        date_records = provider.fetch_records(start_date="2026-08-01", end_date="2026-08-15")
         self.assertTrue(all("2026-08-01" <= r.trading_date <= "2026-08-15" for r in date_records))
 
     def test_optional_field_warnings_accounting_and_partial_status(self):
@@ -47,7 +47,8 @@ class TestCsvProvider(unittest.TestCase):
             f.write(csv_content)
 
         provider = CsvDataProvider(csv_file)
-        records = provider.fetch_ohlcv()
+        fetch_res = provider.fetch_ohlcv()
+        records = fetch_res.records
 
         self.assertEqual(provider.source_rows_count, 1)
         self.assertEqual(provider.rejected_rows_count, 0)
@@ -80,7 +81,7 @@ class TestCsvProvider(unittest.TestCase):
             f.write(csv_content)
 
         provider = CsvDataProvider(csv_file)
-        records = provider.fetch_ohlcv()
+        records = provider.fetch_records()
 
         self.assertEqual(provider.source_rows_count, 2)
         self.assertEqual(provider.rejected_rows_count, 1)
@@ -116,7 +117,7 @@ class TestCsvProvider(unittest.TestCase):
             f.write(csv_content)
 
         provider = CsvDataProvider(csv_file)
-        records = provider.fetch_ohlcv()
+        records = provider.fetch_records()
 
         self.assertEqual(provider.rejected_rows_count, 1)
         self.assertEqual(len(provider.parse_warnings), 2)

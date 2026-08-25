@@ -19,6 +19,13 @@ class ProviderFetchResult:
     warnings: List[str] = field(default_factory=list)
     payload_sha256: Optional[str] = None
 
+    def __post_init__(self):
+        if self.input_rows != self.accepted_rows + self.rejected_rows:
+            raise ValueError(
+                f"Provider row accounting invariant violated: "
+                f"input_rows ({self.input_rows}) != accepted_rows ({self.accepted_rows}) + rejected_rows ({self.rejected_rows})"
+            )
+
 
 @dataclass
 class ProviderHealth:
@@ -45,8 +52,17 @@ class BaseMarketDataProvider(ABC):
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> ProviderFetchResult:
-        """Fetch and return validated OHLCV records with full quality accounting."""
+        """Fetch and return validated OHLCV records with full quality accounting in ProviderFetchResult."""
         ...
+
+    def fetch_records(
+        self,
+        symbols: Optional[Sequence[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[OHLCVRecord]:
+        """Convenience method returning the raw list of validated OHLCVRecord objects."""
+        return self.fetch_ohlcv(symbols=symbols, start_date=start_date, end_date=end_date).records
 
     @abstractmethod
     def health_check(self) -> ProviderHealth:

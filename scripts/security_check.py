@@ -811,6 +811,98 @@ def scan_source_for_secrets(root_dir: str) -> List[str]:
     return violations
 
 
+def validate_data_directory(data_dir: str) -> List[str]:
+    """Validate a standalone data directory (e.g. staging or public/data) against deep JSON schemas and security patterns."""
+    violations: List[str] = []
+    abs_dir = os.path.abspath(data_dir)
+    if not os.path.isdir(abs_dir):
+        return [f"Data directory does not exist: {data_dir}"]
+
+    manifest_path = os.path.join(abs_dir, "manifest.json")
+    overview_path = os.path.join(abs_dir, "overview.json")
+    screener_path = os.path.join(abs_dir, "screener.json")
+    symbols_dir = os.path.join(abs_dir, "symbols")
+
+    if not os.path.isfile(manifest_path):
+        violations.append("Missing required manifest.json in data directory")
+    if not os.path.isfile(overview_path):
+        violations.append("Missing required overview.json in data directory")
+    if not os.path.isfile(screener_path):
+        violations.append("Missing required screener.json in data directory")
+    if not os.path.isdir(symbols_dir):
+        violations.append("Missing required symbols directory in data directory")
+
+    if violations:
+        return violations
+
+    manifest_id = None
+    expected_as_of = None
+    expected_schema = None
+    screener_symbols: Set[str] = set()
+
+    for root, _, files in os.walk(abs_dir):
+        for f in files:
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, abs_dir).replace("\\", "/")
+
+            if not f.endswith(".json"):
+                violations.append(f"Disallowed non-JSON file in data directory: {rel_path}")
+                continue
+
+            try:
+                with open(full_path, "r", encoding="utf-8") as fp:
+                    content = fp.read()
+
+                for pat in SECRET_PATTERNS:
+                    if pat.search(content):
+                        violations.append(f"Secret pattern detected in {rel_path}")
+
+                file_violations, parsed_data = validate_json_deep_structure(rel_path, content)
+                violations.extend(file_violations)
+
+                if parsed_data:
+                    if f == "manifest.json":
+                        manifest_id = parsed_data.get("dataset_id")
+                        expected_as_of = parsed_data.get("as_of_date")
+                        expected_schema = parsed_data.get("schema_version")
+                    elif f == "screener.json":
+                        if "items" in parsed_data and isinstance(parsed_data["items"], list):
+                            screener_symbols = {item.get("symbol") for item in parsed_data["items"] if isinstance(item, dict) and item.get("symbol")}
+            except Exception as e:
+                violations.append(f"Failed to read or parse {rel_path}: {e}")
+
+    # Cross-file consistency checks
+    if manifest_id and not violations:
+        for root, _, files in os.walk(abs_dir):
+            for f in files:
+                if f.endswith(".json"):
+                    full_path = os.path.join(root, f)
+                    rel_path = os.path.relpath(full_path, abs_dir).replace("\\", "/")
+                    try:
+                        with open(full_path, "r", encoding="utf-8") as fp:
+                            data = json.load(fp)
+                        if data.get("dataset_id") != manifest_id:
+                            violations.append(f"{rel_path} dataset_id ({data.get('dataset_id')}) mismatch with manifest ({manifest_id})")
+                        if expected_as_of and data.get("as_of_date") != expected_as_of:
+                            violations.append(f"{rel_path} as_of_date ({data.get('as_of_date')}) mismatch with manifest ({expected_as_of})")
+                        if expected_schema and data.get("schema_version") != expected_schema:
+                            violations.append(f"{rel_path} schema_version ({data.get('schema_version')}) mismatch with manifest ({expected_schema})")
+                    except Exception:
+                        pass
+
+    disk_symbols = {
+        sf[:-5] for sf in os.listdir(symbols_dir) if sf.endswith(".json")
+    } if os.path.isdir(symbols_dir) else set()
+
+    if screener_symbols and disk_symbols and screener_symbols != disk_symbols:
+        if screener_symbols - disk_symbols:
+            violations.append(f"Screener references missing symbol JSONs: {screener_symbols - disk_symbols}")
+        if disk_symbols - screener_symbols:
+            violations.append(f"Unreferenced symbol JSON files in data directory: {disk_symbols - screener_symbols}")
+
+    return violations
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Security check & artifact allow-list validator")
     parser.add_argument("--artifact", default="frontend/dist", help="Path to built artifact directory")

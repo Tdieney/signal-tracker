@@ -3,9 +3,6 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [ main, master ]
-  schedule:
-    # Mon-Fri at 16:00 Asia/Ho_Chi_Minh (09:00 UTC)
-    - cron: '0 9 * * 1-5'
   workflow_dispatch:
 
 concurrency:
@@ -54,6 +51,11 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+
+      - name: Frontend Dependency Security Audit
+        working-directory: frontend
+        run: |
+          npm audit --audit-level=high
 
       - name: Install Playwright Browsers
         working-directory: frontend

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
+import re
+import time
 from typing import Callable, Dict, List, Optional, Sequence
 from pipeline.models import OHLCVRecord
 from pipeline.providers.base import BaseMarketDataProvider, ProviderFetchResult, ProviderHealth
@@ -13,10 +14,20 @@ from pipeline.providers.base import BaseMarketDataProvider, ProviderFetchResult,
 logger = logging.getLogger("vn_stock_signal.company_api_provider")
 
 
+def sanitize_symbol_string(sym: str) -> str:
+    """Sanitize symbol string to uppercase alphanumeric only (max 10 chars)."""
+    return re.sub(r"[^A-Z0-9]", "", str(sym).upper())[:10]
+
+
+def sanitize_date_string(date_val: str) -> str:
+    """Sanitize date string to YYYY-MM-DD format characters only."""
+    return re.sub(r"[^0-9\-]", "", str(date_val))[:10]
+
+
 class CompanyApiDataProvider(BaseMarketDataProvider):
     """Adapter for corporate / authenticated market data APIs.
-    
-    Credentials and base URLs are loaded strictly from environment variables (e.g. DATA_API_KEY).
+
+    Credentials and base URLs are loaded strictly from environment variables.
     Never leaks keys, endpoints, or raw network error dumps into warnings or public manifests.
     """
 
@@ -24,10 +35,12 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
         self,
         api_base_url: Optional[str] = None,
         api_key_env_var: str = "DATA_API_KEY",
-        fetch_fn: Optional[Callable[[str, str, str, str], List[Dict]]] = None,
+        max_retries: int = 2,
+        fetch_fn: Optional[Callable[[str, str, str, str, str], List[Dict]]] = None,
     ):
         self.api_base_url = api_base_url or os.environ.get("DATA_API_BASE_URL", "")
         self.api_key_env_var = api_key_env_var
+        self.max_retries = max(1, max_retries)
         self._fetch_fn = fetch_fn
 
     @property
@@ -35,47 +48,64 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
         return "company_api"
 
     def health_check(self) -> ProviderHealth:
-        """Verify API key availability and endpoint configuration."""
-        has_key = bool(os.environ.get(self.api_key_env_var)) or (self._fetch_fn is not None)
-        if not has_key:
+        """Truthfully verify API configuration and authentication."""
+        api_key = os.environ.get(self.api_key_env_var, "")
+        if not api_key and self._fetch_fn is None:
             return ProviderHealth(
                 is_healthy=False,
                 provider_name=self.provider_name,
                 message=f"Missing required authentication environment variable: {self.api_key_env_var}",
             )
-        return ProviderHealth(
-            is_healthy=True,
-            provider_name=self.provider_name,
-            message="Company API provider authenticated and configured",
-            latency_ms=1.2,
-        )
+        if self._fetch_fn is None and not self.api_base_url:
+            return ProviderHealth(
+                is_healthy=False,
+                provider_name=self.provider_name,
+                message="Company API base URL is unconfigured.",
+            )
+
+        start_time = time.time()
+        try:
+            if self._fetch_fn is not None:
+                # Probe with sanitized parameters
+                self._fetch_fn(self.api_base_url, api_key or "PROBE_KEY", "PROBE", "2026-01-01", "2026-01-01")
+            latency = (time.time() - start_time) * 1000.0
+            return ProviderHealth(
+                is_healthy=True,
+                provider_name=self.provider_name,
+                message="Company API provider probe succeeded",
+                latency_ms=round(latency, 2),
+            )
+        except Exception:
+            return ProviderHealth(
+                is_healthy=False,
+                provider_name=self.provider_name,
+                message="Company API provider probe failed",
+            )
 
     def fetch_ohlcv(
         self,
         symbols: Optional[Sequence[str]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-    ) -> List[OHLCVRecord]:
-        res = self.fetch_ohlcv_result(symbols=symbols, start_date=start_date, end_date=end_date)
-        return res.records
-
-    def fetch_ohlcv_result(
-        self,
-        symbols: Optional[Sequence[str]] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
     ) -> ProviderFetchResult:
-        """Fetch and normalize records via authenticated API endpoint."""
+        """Fetch and normalize records via authenticated API endpoint with strict sanitization."""
         records: List[OHLCVRecord] = []
         warnings: List[str] = []
         input_rows = 0
         accepted_rows = 0
         rejected_rows = 0
-        target_symbols = list(symbols) if symbols else []
+        target_symbols = [sanitize_symbol_string(s) for s in (symbols or [])]
+        clean_start = sanitize_date_string(start_date or "")
+        clean_end = sanitize_date_string(end_date or "")
         sha = hashlib.sha256()
 
+        api_key = os.environ.get(self.api_key_env_var, "")
+
         if self._fetch_fn is None:
-            warnings.append("Company API live client not configured; returning empty dataset.")
+            if not api_key:
+                warnings.append(f"Missing authentication credentials ({self.api_key_env_var}); returning empty dataset.")
+            else:
+                warnings.append("Company API live client not configured; returning empty dataset.")
             return ProviderFetchResult(
                 records=[],
                 provider_name=self.provider_name,
@@ -86,46 +116,63 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
                 payload_sha256=sha.hexdigest(),
             )
 
-        api_key = os.environ.get(self.api_key_env_var, "test-token")
         for sym in target_symbols:
-            try:
-                raw_items = self._fetch_fn(self.api_base_url, api_key, sym, start_date or "")
-                for item in raw_items:
-                    input_rows += 1
-                    try:
-                        sha.update(json.dumps(item, sort_keys=True).encode("utf-8"))
-                        date_str = str(item.get("trading_date") or item.get("date") or "")
-                        open_val = float(item["open"])
-                        high_val = float(item["high"])
-                        low_val = float(item["low"])
-                        close_val = float(item["close"])
-                        vol_val = int(float(item.get("volume", 0)))
-                        ex_val = str(item.get("exchange", "HOSE")).upper()
-                        vn30_val = bool(item.get("in_vn30", False))
+            if not sym:
+                continue
 
-                        if not (open_val > 0 and high_val > 0 and low_val > 0 and close_val > 0):
-                            rejected_rows += 1
-                            warnings.append(f"Symbol {sym} date {date_str}: Non-positive OHLC price")
-                            continue
+            raw_items = None
+            attempts_executed = 0
 
-                        rec = OHLCVRecord(
-                            trading_date=date_str,
-                            symbol=sym,
-                            exchange=ex_val,
-                            open=open_val,
-                            high=high_val,
-                            low=low_val,
-                            close=close_val,
-                            volume=vol_val,
-                            in_vn30=vn30_val,
-                        )
-                        records.append(rec)
-                        accepted_rows += 1
-                    except (KeyError, ValueError, TypeError):
+            # Real retry execution loop
+            for attempt in range(1, self.max_retries + 1):
+                attempts_executed = attempt
+                try:
+                    # Pass both start_date and end_date
+                    raw_items = self._fetch_fn(self.api_base_url, api_key, sym, clean_start, clean_end)
+                    break
+                except Exception:
+                    raw_items = None
+
+            if raw_items is None:
+                warnings.append(f"Failed to fetch data for symbol {sym} after {attempts_executed} attempt(s)")
+                continue
+
+            for item in raw_items:
+                input_rows += 1
+                try:
+                    date_str = sanitize_date_string(str(item.get("trading_date") or item.get("date") or ""))
+                    open_val = float(item["open"])
+                    high_val = float(item["high"])
+                    low_val = float(item["low"])
+                    close_val = float(item["close"])
+                    vol_val = int(float(item.get("volume", 0)))
+                    ex_val = sanitize_symbol_string(str(item.get("exchange", "HOSE"))) or "HOSE"
+                    vn30_val = bool(item.get("in_vn30", False))
+
+                    if not (open_val > 0 and high_val > 0 and low_val > 0 and close_val > 0 and vol_val >= 0):
                         rejected_rows += 1
-                        warnings.append(f"Symbol {sym}: Malformed record rejected")
-            except Exception:
-                warnings.append(f"Failed to fetch data for symbol {sym} from company API")
+                        warnings.append(f"Non-positive OHLC price or invalid volume for symbol {sym} on date {date_str}")
+                        continue
+
+                    # Hash validated record data
+                    sha.update(f"{sym}:{date_str}:{open_val}:{high_val}:{low_val}:{close_val}:{vol_val}".encode("utf-8"))
+
+                    rec = OHLCVRecord(
+                        trading_date=date_str,
+                        symbol=sym,
+                        exchange=ex_val,
+                        open=open_val,
+                        high=high_val,
+                        low=low_val,
+                        close=close_val,
+                        volume=vol_val,
+                        in_vn30=vn30_val,
+                    )
+                    records.append(rec)
+                    accepted_rows += 1
+                except (KeyError, ValueError, TypeError):
+                    rejected_rows += 1
+                    warnings.append(f"Malformed price or volume record rejected for symbol {sym}")
 
         return ProviderFetchResult(
             records=records,

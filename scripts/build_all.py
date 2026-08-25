@@ -39,9 +39,10 @@ def main() -> None:
         "Run Python pipeline test suite",
     )
 
-    # 3. Run frontend tests and production build
+    # 3. Run frontend tests, audit, and production build
     npm_cmd = "npm.cmd" if os.name == "nt" else "npm"
     run_step([npm_cmd, "--prefix", "frontend", "test", "--", "--run"], "Run frontend Vitest suite")
+    run_step([npm_cmd, "--prefix", "frontend", "audit", "--audit-level=high"], "Run frontend npm security audit")
     run_step([npm_cmd, "--prefix", "frontend", "run", "typecheck"], "Run frontend TypeScript typecheck")
     run_step([npm_cmd, "--prefix", "frontend", "run", "build:pages"], "Build frontend static production bundle with base path")
 

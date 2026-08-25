@@ -1,11 +1,18 @@
 import { test, expect, Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-interface PageListenerFilter {
-  isAllowedConsole?: (msgText: string) => boolean;
+export interface PageListenerFilter {
+  isAllowedConsole?: (msgText: string, locationUrl?: string) => boolean;
   isAllowedPageError?: (errMessage: string) => boolean;
   isAllowedRequestFailed?: (url: string, errorText?: string) => boolean;
 }
+
+// Factored and testable predicate helpers
+export const createExactRequestFailedPredicate = (expectedUrlSuffix: string) => {
+  return (url: string, _errorText?: string): boolean => {
+    return url.endsWith(expectedUrlSuffix);
+  };
+};
 
 // Helper to attach CSP violation, console error, and request failure listeners with strict predicates
 async function setupPageListeners(
@@ -25,8 +32,9 @@ async function setupPageListeners(
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       const text = msg.text();
+      const locationUrl = msg.location()?.url;
       const isAllowed =
-        (filter?.isAllowedConsole && filter.isAllowedConsole(text)) ||
+        (filter?.isAllowedConsole && filter.isAllowedConsole(text, locationUrl)) ||
         text.includes('favicon.ico') ||
         text.includes('AbortError');
       if (!isAllowed) {
@@ -273,11 +281,11 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Invalid symbol route renders symbol not found error state', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedRequestFailed: (url) => url.includes('UNKNOWNXYZ.json'),
-      isAllowedConsole: (text) =>
+      isAllowedRequestFailed: createExactRequestFailedPredicate('/data/symbols/UNKNOWNXYZ.json'),
+      isAllowedConsole: (text, locationUrl) =>
+        /Failed to load resource.*404/.test(text) ||
+        (locationUrl ? locationUrl.includes('UNKNOWNXYZ.json') : false) ||
         text.includes('UNKNOWNXYZ.json') ||
-        text.includes('404') ||
-        text.includes('Failed to load resource') ||
         text.includes('không tìm thấy'),
     });
 
@@ -410,10 +418,10 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedRequestFailed: (url) => url.endsWith('/data/manifest.json'),
-      isAllowedConsole: (text) =>
-        text.includes('404') ||
-        text.includes('Failed to load resource') ||
+      isAllowedRequestFailed: createExactRequestFailedPredicate('/data/manifest.json'),
+      isAllowedConsole: (text, locationUrl) =>
+        /Failed to load resource.*404/.test(text) ||
+        (locationUrl ? locationUrl.includes('manifest.json') : false) ||
         text.includes('manifest.json') ||
         text.includes('Không thể tải dữ liệu'),
     });
@@ -449,11 +457,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await setupPageListeners(page, errors, {
       isAllowedConsole: (text) =>
         text.includes('manifest.json') &&
-        (text.includes('JSON') ||
-          text.includes('SyntaxError') ||
-          text.includes('Unexpected token') ||
-          text.includes('Lỗi kết nối khi tải') ||
-          text.includes('Không thể tải dữ liệu')),
+        /JSON|SyntaxError|Unexpected token|Lỗi kết nối khi tải|Không thể tải dữ liệu/.test(text),
     });
 
     await page.route('**/data/manifest.json', (route) =>
@@ -475,9 +479,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await setupPageListeners(page, errors, {
       isAllowedConsole: (text) =>
         text.includes('manifest.json') &&
-        (text.includes('Schema validation failed') ||
-          text.includes('Phiên bản dữ liệu không tương thích') ||
-          text.includes('Không đúng định dạng chuẩn')),
+        /Schema validation failed|Phiên bản dữ liệu không tương thích|Không đúng định dạng chuẩn/.test(text),
     });
 
     await page.route('**/data/manifest.json', async (route) => {
@@ -502,7 +504,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await setupPageListeners(page, errors, {
       isAllowedConsole: (text) =>
         text.includes('manifest.json') &&
-        (text.includes('Schema validation failed') || text.includes('Không đúng định dạng chuẩn')),
+        /Schema validation failed|Không đúng định dạng chuẩn/.test(text),
     });
 
     await page.route('**/data/manifest.json', (route) =>
@@ -522,8 +524,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Overview dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) =>
-        text.includes('overview.json') && text.includes('dataset_id mismatch'),
+      isAllowedConsole: (text) => text.includes('overview.json') && text.includes('dataset_id mismatch'),
     });
 
     await page.route('**/data/overview.json', async (route) => {
@@ -546,8 +547,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Screener dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) =>
-        text.includes('screener.json') && text.includes('dataset_id mismatch'),
+      isAllowedConsole: (text) => text.includes('screener.json') && text.includes('dataset_id mismatch'),
     });
 
     await page.route('**/data/screener.json', async (route) => {
@@ -570,8 +570,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
   test('Fail-closed matrix: Symbol Detail dataset_id mismatch renders fail-closed error banner', async ({ page }) => {
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
-      isAllowedConsole: (text) =>
-        text.includes('FPT.json') && text.includes('dataset_id mismatch'),
+      isAllowedConsole: (text) => text.includes('FPT.json') && text.includes('dataset_id mismatch'),
     });
 
     await page.route('**/data/symbols/FPT.json', async (route) => {
@@ -601,28 +600,26 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     await page.goto('#/');
     await page.waitForSelector('h1');
 
-    // 1. Injected unauthorized inline script attempting evaluation (violating CSP script-src 'self')
+    // 1. Injected unauthorized script attempting evaluation (violating CSP script-src 'self')
     await page.evaluate(() => {
-      try {
-        const script = document.createElement('script');
-        script.textContent = 'window.__unauthorizedExecuted = true;';
-        document.body.appendChild(script);
-      } catch (e) {
-        // Ignored, CSP violation event listener will record violation
-      }
+      const script = document.createElement('script');
+      script.src = 'https://unauthorized-external-cdn.example.com/evil.js';
+      document.head.appendChild(script);
     });
+
+    await page.waitForTimeout(200);
 
     // Verify CSP violation was recorded
     const cspViolations = await getCapturedCSPViolations(page);
     expect(cspViolations.length).toBeGreaterThan(0);
     expect(cspViolations[0]).toContain("script-src");
 
-    // 2. Injected unexpected console error
+    // 2. Injected unexpected console error containing common keywords to test strict allow-list containment
     await page.evaluate(() => {
-      console.error('UNEXPECTED_NEGATIVE_CONTROL_ERROR: Injected runtime crash');
+      console.error('UNEXPECTED_NEGATIVE_CONTROL_ERROR: Injected runtime crash 404 in manifest.json');
     });
 
-    // Verify error listener captured the unexpected error
+    // Verify error listener captured the unexpected error despite containing '404' and 'manifest.json'
     expect(capturedErrors.length).toBeGreaterThan(0);
     expect(capturedErrors.some((e) => e.includes('UNEXPECTED_NEGATIVE_CONTROL_ERROR'))).toBe(true);
   });

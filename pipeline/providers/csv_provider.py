@@ -46,16 +46,6 @@ class CsvDataProvider(BaseMarketDataProvider):
         symbols: Optional[Sequence[str]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-    ) -> List[OHLCVRecord]:
-        """Parse CSV file and return OHLCVRecord list filtered by symbols and date range."""
-        result = self.fetch_ohlcv_result(symbols=symbols, start_date=start_date, end_date=end_date)
-        return result.records
-
-    def fetch_ohlcv_result(
-        self,
-        symbols: Optional[Sequence[str]] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
     ) -> ProviderFetchResult:
         """Parse CSV file and return full ProviderFetchResult with quality accounting."""
         records: List[OHLCVRecord] = []

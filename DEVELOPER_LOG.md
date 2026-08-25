@@ -648,3 +648,141 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Strict Content Security Policy preserved without modifications.
   - All data contracts and mathematical invariants verified.
 - Remaining work: Push commit to remote, track CI and deploy workflows, verify live deployment on GitHub Pages, and provide consolidated summary for user review.
+
+---
+
+## 2026-08-25T15:05:00+07:00 — agy-20260825-phase2-remediation-hardening — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Remediation and comprehensive hardening of Phase 2 (Contract unification, fail-closed adapters with zero secret leakage, deep DatasetManager verification with transactional rollback, deterministic time-injected build, supported calendar range, exact E2E allow-lists, CI audit, and documentation).
+- Reference Commit: `0b6a227accecff1e6732d42b685a25cafb5735e9`
+- Corrections for Previous Session (`agy-20260825-phase2-provider-neutral-engine`):
+  1. Test suite count: Python suite had 47 total test cases (46 passed, 1 skipped), not 47 passed.
+  2. Phase 2 Scope & Status: Clarify that Phase 2 implements provider-neutral architecture, contracts, and scaffolding; live market data ingestion is not completed because no provider/credential has been chosen or funded by the repository owner. Production/demo default remains strictly demo fixture mode.
+  3. Commit SHA: Previous log recorded short hash `0b6a227`; the authoritative full commit SHA is `0b6a227accecff1e6732d42b685a25cafb5735e9`.
+- Scope of Work:
+  1. Unify `BaseMarketDataProvider.fetch_ohlcv()` to return `ProviderFetchResult` across all implementations; add polymorphic contract tests and row accounting invariants (`input_rows == accepted_rows + rejected_rows`).
+  2. Harden `VnstockDataProvider` and `CompanyApiDataProvider`:
+     - Provide truthful health checks (`is_healthy=False` when unconfigured; `is_healthy=True` only when a verified fetch function/client is provided and passes probe).
+     - Remove unsupported retry/timeout claims or implement real execution loops with deterministic tests.
+     - Pass both `start_date` and `end_date` in Company API.
+     - Remove fallback `"test-token"`.
+     - Sanitize all symbol/date/provider warnings so raw provider payloads, internal exceptions, endpoints, or tokens never leak into warnings, logs, or public JSON.
+     - Add adversarial test cases injecting fake tokens in raw fields, symbols, exceptions, URLs, and responses, proving zero leakage.
+  3. Harden `DatasetManager`:
+     - Reuse deep JSON schema validation, file allow-lists, and path escape checks from `scripts/security_check.py`.
+     - Reject incomplete or malformed staging directories.
+     - Require explicit `workspace_root` and validate that `target`, `staging`, `lkg`, and `swap` directories are all within workspace and strictly disjoint before executing any file operations.
+     - Design and test real multi-step transactional rollback with step failure injection, proving byte-for-byte recovery and zero orphan directories.
+  4. GitHub Pages / LKG Architecture:
+     - Document that GitHub Actions runners are ephemeral; local `.lkg_data` is preserved per-machine and does not survive ephemeral runners.
+     - Retain previous successful deployment on GitHub Pages when a workflow build fails.
+     - Remove the daily cron schedule from `.github/workflows/deploy-pages.yml` to prevent deploying demo fixtures daily.
+  5. Deterministic Build:
+     - Inject `reference_time` into `evaluate_dataset_freshness`, `evaluate_market_session_status`, and `build_dataset_from_records`.
+     - Fixed test builds with fixed `generated_at` and `reference_time` must yield byte-for-byte identical output trees.
+     - Include freshness and session status in the canonical dataset ID hash to ensure dataset identity immutability.
+     - Add regression tests simulating before and after 15:30 on the same date.
+  6. Vietnam Trading Calendar:
+     - Explicitly define supported range (2025–2027), version, and source.
+     - Fail closed (`UNKNOWN` / non-trading day) for dates outside the supported range.
+     - Require provider data completeness before declaring `CLOSED_CONFIRMED`.
+     - Add boundary tests for session open/close, weekends, holidays, and unsupported years.
+  7. E2E Allow-List Narrowing:
+     - Remove broad substring matching in `frontend/e2e/app.spec.ts` in favor of exact URL + exact event predicates.
+     - Add negative controls injecting unrelated errors containing "404", "JSON", or file names to prove they trigger fail-closed test failures.
+  8. CI & Release Verification:
+     - Add `npm audit --audit-level=high` and git diff whitespace check to release gates.
+     - Ensure zero trailing whitespace.
+- Planned Files:
+  - `pipeline/providers/base.py` [MODIFY]
+  - `pipeline/providers/csv_provider.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `pipeline/providers/company_api_provider.py` [MODIFY]
+  - `pipeline/freshness.py` [MODIFY]
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `docs/05-architecture.md` [MODIFY]
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `tests/test_provider_interface.py` [MODIFY]
+  - `tests/test_freshness_engine.py` [MODIFY]
+  - `tests/test_dataset_manager.py` [MODIFY]
+  - `tests/test_serialization.py` [MODIFY]
+  - `scripts/build_all.py` [MODIFY]
+- Status: STARTED
+
+---
+
+## 2026-08-25T15:11:00+07:00 — agy-20260825-phase2-remediation-hardening — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Scope: Remediation and comprehensive hardening of Phase 2 (Contract unification, fail-closed adapters with zero secret leakage, deep DatasetManager verification with transactional rollback, deterministic time-injected build, supported calendar range, exact E2E allow-lists, CI audit, and documentation).
+- Reference Commit: `0b6a227accecff1e6732d42b685a25cafb5735e9`
+- Key Decisions & Implementations:
+  1. BaseMarketDataProvider Contract Unification: `fetch_ohlcv()` returns `ProviderFetchResult` with full row accounting (`input_rows == accepted_rows + rejected_rows`) across all implementations (`CsvDataProvider`, `VnstockDataProvider`, `CompanyApiDataProvider`). Added convenience `fetch_records()`.
+  2. Adapter Fail-Closed Hardening & Sanitization:
+     - Truthful health checks (`is_healthy=False` when unconfigured).
+     - Genuine retry execution loops with truthful attempt counts.
+     - Removed fallback `"test-token"`.
+     - Passed both `start_date` and `end_date` in Company API contract.
+     - Sanitized all symbols, dates, and warning strings to ensure raw provider payloads, internal exceptions, endpoints, or tokens never leak into logs or public JSON.
+     - Added adversarial unit tests verifying zero secret leakage.
+  3. Hardened DatasetManager:
+     - Explicit `workspace_root` validation; strict disjoint path assertions.
+     - Deep validation of staging directory using `validate_data_directory` from `scripts/security_check.py`.
+     - Multi-step transactional swap with step failure rollback and zero orphan directories.
+     - Local `.lkg_data` backup and restoration engine.
+  4. Ephemeral Runner & Deployment Preservation Architecture:
+     - Documented runner ephemerality and the production fail-safe default (build/validation failure aborts workflow before upload/deploy, preserving previous live deployment on GitHub Pages).
+     - Removed fake daily cron deploy from `.github/workflows/deploy-pages.yml`.
+     - Kept website in truthful demo fixture mode.
+  5. Deterministic Build:
+     - Injected `reference_time` into freshness and market session evaluations.
+     - Canonical `dataset_id` includes freshness and session status for deterministic identity immutability.
+     - Verified byte-for-byte reproducibility across runs with fixed reference time.
+  6. Vietnam Trading Calendar:
+     - Explicitly bounded supported years to 2025–2027 (version 2026.1, HOSE/HNX and Labor Code holidays).
+     - Fail closed (`UNKNOWN`/non-trading day) outside supported range.
+     - `CLOSED_CONFIRMED` requires live provider provenance and complete data.
+     - Added boundary tests for pre/post 15:30 on the same date.
+  7. E2E Allow-List Narrowing:
+     - Factored predicate helpers with exact URL suffixes and anchored error patterns.
+     - Enhanced negative control tests injecting unauthorized scripts and unexpected errors.
+  8. CI Release Gates:
+     - Added `npm audit --audit-level=high` and git diff whitespace checks.
+- Files Changed:
+  - `pipeline/providers/base.py` [MODIFY]
+  - `pipeline/providers/csv_provider.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `pipeline/providers/company_api_provider.py` [MODIFY]
+  - `pipeline/freshness.py` [MODIFY]
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `scripts/security_check.py` [MODIFY]
+  - `scripts/build_all.py` [MODIFY]
+  - `docs/05-architecture.md` [MODIFY]
+  - `.github/workflows/ci.yml` [MODIFY]
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `tests/test_csv_provider.py` [MODIFY]
+  - `tests/test_provider_interface.py` [MODIFY]
+  - `tests/test_freshness_engine.py` [MODIFY]
+  - `tests/test_dataset_manager.py` [MODIFY]
+  - `DEVELOPER_LOG.md` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: 50 test cases (49 passed, 1 skipped).
+  - `npm --prefix frontend test -- --run`: 29 unit tests passed across 5 test files.
+  - `npm --prefix frontend run typecheck`: 0 errors.
+  - `npm --prefix frontend run build:pages`: Success.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 violations.
+  - `npm --prefix frontend audit --audit-level=high`: 0 vulnerabilities.
+  - `npm --prefix frontend run test:e2e`: 104 passed, 4 skipped across 6 browser profiles.
+  - `python scripts/build_all.py`: Full pass across all steps.
+  - `git diff --check`: 0 whitespace warnings.
+- Safety & Security Impact:
+  - Zero hardcoded tokens or API credentials.
+  - Zero secret leakage in warning strings, exceptions, logs, or public JSON files.
+  - Strict Content Security Policy intact without modifications.
+  - All data contracts, mathematical invariants, and fail-closed defaults verified.
+- Remaining work: Commit and push changes, obtain full commit SHA, verify CI and Deploy workflows on remote, and execute live smoke tests on GitHub Pages.
