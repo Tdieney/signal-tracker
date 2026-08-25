@@ -4,8 +4,26 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import re
 from typing import List, Optional, Sequence
 from pipeline.models import OHLCVRecord
+
+SYMBOL_STRICT_REGEX = re.compile(r"^[A-Z0-9]{1,10}$")
+DATE_STRICT_REGEX = re.compile(r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$")
+
+
+def safe_symbol_label(sym: Optional[str]) -> str:
+    """Return strictly validated symbol string or fixed placeholder [INVALID_SYMBOL]."""
+    if sym and isinstance(sym, str) and SYMBOL_STRICT_REGEX.match(sym.strip().upper()):
+        return sym.strip().upper()
+    return "[INVALID_SYMBOL]"
+
+
+def safe_date_label(date_str: Optional[str]) -> str:
+    """Return strictly validated date string or fixed placeholder [INVALID_DATE]."""
+    if date_str and isinstance(date_str, str) and DATE_STRICT_REGEX.match(date_str.strip()):
+        return date_str.strip()
+    return "[INVALID_DATE]"
 
 
 @dataclass
@@ -18,6 +36,8 @@ class ProviderFetchResult:
     rejected_rows: int
     warnings: List[str] = field(default_factory=list)
     payload_sha256: Optional[str] = None
+    is_complete: bool = False
+    provenance: str = "fixture"
 
     def __post_init__(self):
         if self.input_rows != self.accepted_rows + self.rejected_rows:

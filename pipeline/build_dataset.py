@@ -13,7 +13,12 @@ from typing import Optional, Sequence
 # Ensure repo root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from pipeline.freshness import evaluate_dataset_freshness, evaluate_market_session_status
+from pipeline.freshness import (
+    CALENDAR_VERSION,
+    VietnamTradingCalendar,
+    evaluate_dataset_freshness,
+    evaluate_market_session_status,
+)
 from pipeline.indicators import calculate_all_indicators
 from pipeline.models import (
     MARKET_TIMEZONE,
@@ -48,6 +53,8 @@ def compute_deterministic_dataset_id(
     quality_metadata: dict | None = None,
     market_session_status: str = "UNKNOWN",
     freshness_status: str = "UNKNOWN",
+    freshness_expected_as_of_date: str = "",
+    calendar_version: str = CALENDAR_VERSION,
 ) -> str:
     """Derive deterministic 16-hex dataset ID hash from canonical sorted representation of all pipeline inputs & public metrics."""
     canonical_data = {
@@ -59,6 +66,8 @@ def compute_deterministic_dataset_id(
         "quality_metadata": quality_metadata or {},
         "market_session_status": market_session_status,
         "freshness_status": freshness_status,
+        "freshness_expected_as_of_date": freshness_expected_as_of_date,
+        "calendar_version": calendar_version,
         "records": [
             [
                 r.symbol,
@@ -94,6 +103,7 @@ def build_dataset_from_records(
     workspace_root: str | None = None,
     source_rows_count: int | None = None,
     is_live_provider: bool = False,
+    is_complete: bool = False,
 ) -> str:
     """Build and serialize full dataset from normalized OHLCV records with injected reference time."""
     if isinstance(records, ProviderFetchResult):
@@ -102,6 +112,7 @@ def build_dataset_from_records(
         parse_warnings = parse_warnings or records.warnings
         source_rows_count = source_rows_count or records.input_rows
         provider_name = records.provider_name or provider_name
+        is_complete = records.is_complete
     else:
         raw_records = list(records)
 
@@ -136,7 +147,6 @@ def build_dataset_from_records(
     ref_dt = reference_time
     if ref_dt is None and fixed_generated_at:
         try:
-            # Parse fixed ISO timestamp
             clean_iso = fixed_generated_at.replace("Z", "+00:00")
             ref_dt = datetime.fromisoformat(clean_iso)
         except Exception:
@@ -147,18 +157,20 @@ def build_dataset_from_records(
     generated_at_str = fixed_generated_at or ref_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # 7. Evaluate Session Status and Freshness with reference time injection
-    has_complete = (quality_info.status.value in ("PASS", "PARTIAL")) and len(accepted_records) > 0
+    cal = VietnamTradingCalendar()
     session_status = evaluate_market_session_status(
         as_of_date=target_as_of,
         reference_time=ref_dt,
         is_live_provider=is_live_provider,
-        has_complete_data=has_complete,
+        is_complete=is_complete,
+        calendar=cal,
     )
     freshness_info = evaluate_dataset_freshness(
         as_of_date=target_as_of,
         reference_time=ref_dt,
         is_live_provider=is_live_provider,
-        has_complete_data=has_complete,
+        is_complete=is_complete,
+        calendar=cal,
     )
 
     # 8. Compute Canonical Dataset ID
@@ -177,6 +189,8 @@ def build_dataset_from_records(
         },
         market_session_status=session_status.value,
         freshness_status=freshness_info.status.value,
+        freshness_expected_as_of_date=freshness_info.expected_as_of_date,
+        calendar_version=cal.version,
     )
 
     overview_data = OverviewData(
@@ -251,6 +265,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    ref_dt = None
+    if args.reference_time:
+        try:
+            ref_dt = datetime.fromisoformat(args.reference_time.replace("Z", "+00:00"))
+        except Exception as ex:
+            print(f"ERROR: Invalid ISO 8601 --reference-time '{args.reference_time}': {ex}", file=sys.stderr)
+            sys.exit(1)
+
     if args.provider.lower() == "csv":
         provider = CsvDataProvider(args.input)
         raw_result = provider.fetch_ohlcv()
@@ -262,13 +284,6 @@ def main() -> None:
         raw_result = provider.fetch_ohlcv()
 
     print(f"Processing {len(raw_result.records)} records from {args.provider} (input_rows={raw_result.input_rows})...")
-
-    ref_dt = None
-    if args.reference_time:
-        try:
-            ref_dt = datetime.fromisoformat(args.reference_time.replace("Z", "+00:00"))
-        except Exception:
-            ref_dt = None
 
     try:
         ds_id = build_dataset_from_records(
@@ -284,6 +299,7 @@ def main() -> None:
             reference_time=ref_dt,
             source_rows_count=raw_result.input_rows,
             is_live_provider=(args.provider.lower() != "csv"),
+            is_complete=raw_result.is_complete,
         )
         print(f"Successfully generated dataset {ds_id} into {args.output}")
     except Exception as ex:

@@ -18,8 +18,11 @@ VN_TZ = timezone(timedelta(hours=7))
 # Supported calendar boundaries and metadata
 SUPPORTED_CALENDAR_YEAR_MIN = 2025
 SUPPORTED_CALENDAR_YEAR_MAX = 2027
-CALENDAR_VERSION = "2026.1"
-CALENDAR_SOURCE = "HOSE/HNX Trading Rules & Vietnam Labor Code statutory holidays"
+CALENDAR_VERSION = "2026.1-provisional"
+CALENDAR_SOURCE = (
+    "Provisional calendar definition (2025–2027) based on HOSE/HNX trading rules "
+    "& Vietnam Labor Code statutory holidays; requires annual live regulatory synchronization"
+)
 
 # Standard VN public holidays (YYYY-MM-DD) for supported years (2025–2027)
 KNOWN_VIETNAM_HOLIDAYS: Set[str] = {
@@ -41,12 +44,14 @@ SESSION_SETTLED_CONFIRMED_TIME = time(15, 30)
 
 
 class VietnamTradingCalendar:
-    """Accurate trading calendar engine for HOSE / HNX / UPCOM exchanges within supported year range."""
+    """Trading calendar engine for HOSE / HNX / UPCOM exchanges within supported year range."""
 
     def __init__(self, holidays: Optional[Set[str]] = None):
         self.holidays = holidays if holidays is not None else set(KNOWN_VIETNAM_HOLIDAYS)
         self.min_year = SUPPORTED_CALENDAR_YEAR_MIN
         self.max_year = SUPPORTED_CALENDAR_YEAR_MAX
+        self.version = CALENDAR_VERSION
+        self.source = CALENDAR_SOURCE
 
     def is_within_supported_range(self, date_str: str) -> bool:
         """Check if date_str falls within supported calendar years (2025-2027)."""
@@ -105,11 +110,11 @@ def evaluate_market_session_status(
     as_of_date: str,
     reference_time: Optional[datetime] = None,
     is_live_provider: bool = False,
-    has_complete_data: bool = True,
+    is_complete: bool = False,
     calendar: Optional[VietnamTradingCalendar] = None,
 ) -> MarketSessionStatus:
-    """Determine market session status according to strict data contract rules."""
-    if not is_live_provider or not has_complete_data:
+    """Determine market session status according to strict completeness and provenance contracts."""
+    if not is_live_provider or not is_complete:
         # Safe default for fixtures, demo builds, or incomplete data
         return MarketSessionStatus.UNKNOWN
 
@@ -142,7 +147,7 @@ def evaluate_dataset_freshness(
     as_of_date: str,
     reference_time: Optional[datetime] = None,
     is_live_provider: bool = False,
-    has_complete_data: bool = True,
+    is_complete: bool = False,
     calendar: Optional[VietnamTradingCalendar] = None,
 ) -> FreshnessInfo:
     """Evaluate whether the dataset is FRESH, STALE, or UNKNOWN with reference_time injection."""
@@ -150,7 +155,7 @@ def evaluate_dataset_freshness(
     ref_dt = reference_time or datetime.now(timezone.utc)
     expected_as_of = cal.get_latest_completed_trading_day(ref_dt) or as_of_date
 
-    if not is_live_provider or not has_complete_data:
+    if not is_live_provider or not is_complete:
         return FreshnessInfo(
             status=FreshnessStatus.UNKNOWN,
             expected_as_of_date=expected_as_of,

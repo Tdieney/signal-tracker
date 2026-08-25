@@ -1,22 +1,35 @@
-"""Unit tests for VietnamTradingCalendar, market session detection, and freshness evaluation."""
+"""Unit tests for VietnamTradingCalendar, market session detection, freshness evaluation, and dataset identity."""
 
 from datetime import datetime, timedelta, timezone
+import json
+import os
+import shutil
+import tempfile
 import unittest
 
+from pipeline.build_dataset import (
+    build_dataset_from_records,
+    compute_deterministic_dataset_id,
+)
 from pipeline.freshness import (
+    CALENDAR_VERSION,
     VietnamTradingCalendar,
     evaluate_dataset_freshness,
     evaluate_market_session_status,
 )
-from pipeline.models import FreshnessStatus, MarketSessionStatus
+from pipeline.models import FreshnessStatus, MarketSessionStatus, OHLCVRecord
 
 
 class TestFreshnessEngine(unittest.TestCase):
-    """Test suite verifying Vietnam stock market calendar, supported ranges, and freshness semantics."""
+    """Test suite verifying Vietnam stock market calendar, supported ranges, freshness semantics, and dataset identity."""
 
     def setUp(self):
         self.tz = timezone(timedelta(hours=7))
         self.cal = VietnamTradingCalendar(holidays={"2026-04-30", "2026-05-01", "2026-09-02"})
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_trading_calendar_supported_year_bounds(self):
         """Calendar strictly bounds to supported years 2025-2027 and fails closed outside."""
@@ -32,92 +45,116 @@ class TestFreshnessEngine(unittest.TestCase):
         self.assertFalse(self.cal.is_trading_day("2028-01-03"))
 
     def test_trading_calendar_weekdays_and_holidays(self):
-        # 2026-08-21 is Friday (weekday) -> True
         self.assertTrue(self.cal.is_trading_day("2026-08-21"))
-        # 2026-08-22 is Saturday -> False
         self.assertFalse(self.cal.is_trading_day("2026-08-22"))
-        # 2026-08-23 is Sunday -> False
         self.assertFalse(self.cal.is_trading_day("2026-08-23"))
-        # 2026-04-30 is a holiday -> False
         self.assertFalse(self.cal.is_trading_day("2026-04-30"))
 
     def test_pre_and_post_1530_market_session_boundary(self):
         """Regression test simulating before and after 15:30 on the exact same trading day."""
-        # Friday 2026-08-21 at 14:45 (market still trading)
         dt_trading = datetime(2026, 8, 21, 14, 45, tzinfo=self.tz)
         status_trading = evaluate_market_session_status(
             as_of_date="2026-08-21",
             reference_time=dt_trading,
             is_live_provider=True,
-            has_complete_data=True,
+            is_complete=True,
             calendar=self.cal,
         )
         self.assertEqual(status_trading, MarketSessionStatus.UNKNOWN)
 
-        # Friday 2026-08-21 at 15:35 (after 15:30 settlement)
         dt_closed = datetime(2026, 8, 21, 15, 35, tzinfo=self.tz)
         status_closed = evaluate_market_session_status(
             as_of_date="2026-08-21",
             reference_time=dt_closed,
             is_live_provider=True,
-            has_complete_data=True,
+            is_complete=True,
             calendar=self.cal,
         )
         self.assertEqual(status_closed, MarketSessionStatus.CLOSED_CONFIRMED)
 
-    def test_session_status_requires_data_completeness(self):
-        """Even post 15:30, if has_complete_data=False or demo mode, status MUST be UNKNOWN."""
+    def test_session_status_and_single_record_fpt_regression(self):
+        """Regression test: Single FPT record or incomplete fixture yields UNKNOWN session and UNKNOWN freshness."""
         dt_closed = datetime(2026, 8, 21, 16, 0, tzinfo=self.tz)
 
-        # Demo mode -> UNKNOWN
+        # Demo mode / single fixture -> UNKNOWN session & UNKNOWN freshness
         status_demo = evaluate_market_session_status(
             as_of_date="2026-08-21",
             reference_time=dt_closed,
             is_live_provider=False,
-            has_complete_data=True,
+            is_complete=False,
+            calendar=self.cal,
+        )
+        freshness_demo = evaluate_dataset_freshness(
+            as_of_date="2026-08-21",
+            reference_time=dt_closed,
+            is_live_provider=False,
+            is_complete=False,
             calendar=self.cal,
         )
         self.assertEqual(status_demo, MarketSessionStatus.UNKNOWN)
+        self.assertEqual(freshness_demo.status, FreshnessStatus.UNKNOWN)
 
-        # Incomplete data -> UNKNOWN
+        # Live provider without full completeness confirmation -> UNKNOWN
         status_incomplete = evaluate_market_session_status(
             as_of_date="2026-08-21",
             reference_time=dt_closed,
             is_live_provider=True,
-            has_complete_data=False,
+            is_complete=False,
             calendar=self.cal,
         )
         self.assertEqual(status_incomplete, MarketSessionStatus.UNKNOWN)
 
-    def test_evaluate_dataset_freshness(self):
-        dt_now = datetime(2026, 8, 21, 16, 0, tzinfo=self.tz)
+    def test_dataset_identity_sensitivity_to_expected_dates(self):
+        """Two builds with different expected dates (e.g. 2026-08-25 vs 2026-08-26) MUST have different dataset_id."""
+        records = [
+            OHLCVRecord("2026-08-21", "FPT", "HOSE", 100.0, 102.0, 99.0, 101.0, None, 1000, None, True)
+        ]
 
-        # Demo fixture -> UNKNOWN
-        freshness_demo = evaluate_dataset_freshness(
+        id_day1 = compute_deterministic_dataset_id(
             as_of_date="2026-08-21",
-            reference_time=dt_now,
-            is_live_provider=False,
-            calendar=self.cal,
+            records=records,
+            freshness_status="STALE",
+            freshness_expected_as_of_date="2026-08-25",
         )
-        self.assertEqual(freshness_demo.status, FreshnessStatus.UNKNOWN)
-
-        # Live fresh -> FRESH
-        freshness_live_fresh = evaluate_dataset_freshness(
+        id_day2 = compute_deterministic_dataset_id(
             as_of_date="2026-08-21",
-            reference_time=dt_now,
-            is_live_provider=True,
-            calendar=self.cal,
+            records=records,
+            freshness_status="STALE",
+            freshness_expected_as_of_date="2026-08-26",
         )
-        self.assertEqual(freshness_live_fresh.status, FreshnessStatus.FRESH)
 
-        # Live stale -> STALE
-        freshness_live_stale = evaluate_dataset_freshness(
-            as_of_date="2026-08-15",
-            reference_time=dt_now,
-            is_live_provider=True,
-            calendar=self.cal,
+        self.assertNotEqual(id_day1, id_day2, "Dataset ID must differ when expected_as_of_date changes")
+
+    def test_deterministic_build_reproducibility(self):
+        """Fixed reference time build produces identical dataset_id across independent executions."""
+        records = [
+            OHLCVRecord("2026-08-21", "FPT", "HOSE", 100.0, 102.0, 99.0, 101.0, None, 1000, None, True)
+        ]
+        fixed_time = datetime(2026, 8, 25, 10, 0, 0, tzinfo=timezone.utc)
+
+        out_dir_1 = os.path.join(self.test_dir, "out1")
+        out_dir_2 = os.path.join(self.test_dir, "out2")
+
+        id1 = build_dataset_from_records(
+            records=records,
+            output_dir=out_dir_1,
+            fixed_generated_at="2026-08-25T10:00:00Z",
+            reference_time=fixed_time,
+            workspace_root=self.test_dir,
         )
-        self.assertEqual(freshness_live_stale.status, FreshnessStatus.STALE)
+        id2 = build_dataset_from_records(
+            records=records,
+            output_dir=out_dir_2,
+            fixed_generated_at="2026-08-25T10:00:00Z",
+            reference_time=fixed_time,
+            workspace_root=self.test_dir,
+        )
+
+        self.assertEqual(id1, id2)
+
+        # Byte-for-byte comparison of manifest.json
+        with open(os.path.join(out_dir_1, "manifest.json"), "rb") as f1, open(os.path.join(out_dir_2, "manifest.json"), "rb") as f2:
+            self.assertEqual(f1.read(), f2.read())
 
 
 if __name__ == "__main__":

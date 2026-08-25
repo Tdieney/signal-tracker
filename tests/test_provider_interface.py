@@ -1,10 +1,16 @@
-"""Unit tests for BaseMarketDataProvider implementations and provider contracts."""
+"""Unit tests for BaseMarketDataProvider implementations, provider contracts, and adversarial secret containment."""
 
 import os
 import unittest
 from typing import List
 from pipeline.models import OHLCVRecord
-from pipeline.providers.base import BaseMarketDataProvider, ProviderFetchResult, ProviderHealth
+from pipeline.providers.base import (
+    BaseMarketDataProvider,
+    ProviderFetchResult,
+    ProviderHealth,
+    safe_date_label,
+    safe_symbol_label,
+)
 from pipeline.providers.company_api_provider import CompanyApiDataProvider
 from pipeline.providers.csv_provider import CsvDataProvider
 from pipeline.providers.vnstock_provider import VnstockDataProvider
@@ -29,14 +35,11 @@ class TestProviderInterface(unittest.TestCase):
         ]
 
         for p in providers:
-            # 1. Uniform fetch_ohlcv returns ProviderFetchResult
             result = p.fetch_ohlcv(symbols=["FPT", "VNM"])
             self.assertIsInstance(result, ProviderFetchResult)
             self.assertEqual(result.provider_name, p.provider_name)
-            # Invariant: input_rows == accepted_rows + rejected_rows
             self.assertEqual(result.input_rows, result.accepted_rows + result.rejected_rows)
 
-            # 2. Convenience fetch_records returns List[OHLCVRecord]
             records = p.fetch_records(symbols=["FPT", "VNM"])
             self.assertIsInstance(records, list)
             self.assertEqual(len(records), result.accepted_rows)
@@ -50,7 +53,6 @@ class TestProviderInterface(unittest.TestCase):
         self.assertFalse(health_vn.is_healthy)
         self.assertIn("unconfigured", health_vn.message.lower())
 
-        # Company API with missing key and no fetch_fn
         if "DATA_API_KEY" in os.environ:
             del os.environ["DATA_API_KEY"]
         unconfigured_company = CompanyApiDataProvider(fetch_fn=None)
@@ -74,26 +76,49 @@ class TestProviderInterface(unittest.TestCase):
         self.assertEqual(attempts, 3)
         self.assertEqual(res.accepted_rows, 1)
 
-    def test_adversarial_zero_secret_leakage(self):
-        """Adversarial test: secret tokens injected in symbols, exceptions, URLs, and fields must NEVER leak."""
-        secret_token = "SECRET_BEARER_TOKEN_PROD_ABC12345"
+    def test_adversarial_zero_secret_leakage_exact_tokens(self):
+        """Adversarial test: exact tokens (1234-56-78, ABC12345, ghp_FAKE_TOKEN_123456789) injected across fields NEVER leak."""
+        test_tokens = [
+            "1234-56-78",
+            "ABC12345",
+            "ghp_FAKE_TOKEN_123456789",
+        ]
 
-        def malicious_fetch(url, key, sym, start, end):
-            # Inject fake token in exception, raw field, and corrupted date
-            raise RuntimeError(f"Internal crash at {url} with auth={secret_token}")
+        for token in test_tokens:
+            # 1. Company API injection in URL, Key, Exception, Response
+            def malicious_fetch(url, key, sym, start, end):
+                raise RuntimeError(f"Crashing with token {token} at {url}")
 
-        provider = CompanyApiDataProvider(
-            api_base_url=f"https://api.example.com/{secret_token}",
-            fetch_fn=malicious_fetch,
-        )
+            provider_co = CompanyApiDataProvider(
+                api_base_url=f"https://api.example.com/{token}",
+                fetch_fn=malicious_fetch,
+            )
+            res_co = provider_co.fetch_ohlcv(symbols=[f"MAL_{token}"])
+            for w in res_co.warnings:
+                self.assertNotIn(token, w, f"Token '{token}' leaked in CompanyApi warning: {w}")
 
-        res = provider.fetch_ohlcv(symbols=[f"SYM_{secret_token}"])
-        self.assertEqual(res.accepted_rows, 0)
-        self.assertEqual(res.rejected_rows, 0)
+            # 2. Vnstock injection in response payload and invalid date
+            def bad_response_fetch(sym, start, end):
+                return [
+                    {
+                        "trading_date": f"DATE_{token}",
+                        "symbol": f"SYM_{token}",
+                        "open": -1.0,
+                        "high": 100.0,
+                        "low": 90.0,
+                        "close": 95.0,
+                        "volume": -100,
+                    }
+                ]
 
-        # Assert token is nowhere in warnings
-        for w in res.warnings:
-            self.assertNotIn(secret_token, w)
+            provider_vn = VnstockDataProvider(fetch_fn=bad_response_fetch)
+            res_vn = provider_vn.fetch_ohlcv(symbols=["FPT"])
+            for w in res_vn.warnings:
+                self.assertNotIn(token, w, f"Token '{token}' leaked in Vnstock warning: {w}")
+
+            # 3. Label sanitizers
+            self.assertEqual(safe_symbol_label(f"SYM_{token}"), "[INVALID_SYMBOL]")
+            self.assertEqual(safe_date_label(f"2026_{token}"), "[INVALID_DATE]")
 
 
 if __name__ == "__main__":

@@ -818,6 +818,9 @@ def validate_data_directory(data_dir: str) -> List[str]:
     if not os.path.isdir(abs_dir):
         return [f"Data directory does not exist: {data_dir}"]
 
+    if os.path.islink(abs_dir):
+        return [f"Data directory cannot be a symlink or junction: {data_dir}"]
+
     manifest_path = os.path.join(abs_dir, "manifest.json")
     overview_path = os.path.join(abs_dir, "overview.json")
     screener_path = os.path.join(abs_dir, "screener.json")
@@ -840,14 +843,25 @@ def validate_data_directory(data_dir: str) -> List[str]:
     expected_schema = None
     screener_symbols: Set[str] = set()
 
-    for root, _, files in os.walk(abs_dir):
+    for root, dirs, files in os.walk(abs_dir):
+        for d in dirs:
+            dir_full = os.path.join(root, d)
+            if os.path.islink(dir_full):
+                violations.append(f"Symlink or junction subdirectory forbidden in data directory: {dir_full}")
+
         for f in files:
             full_path = os.path.join(root, f)
             rel_path = os.path.relpath(full_path, abs_dir).replace("\\", "/")
 
+            if os.path.islink(full_path):
+                violations.append(f"Symlink file forbidden in data directory: {rel_path}")
+                continue
+
             if not f.endswith(".json"):
                 violations.append(f"Disallowed non-JSON file in data directory: {rel_path}")
                 continue
+
+            data_norm_path = f"data/{rel_path}" if not rel_path.startswith("data/") else rel_path
 
             try:
                 with open(full_path, "r", encoding="utf-8") as fp:
@@ -857,7 +871,7 @@ def validate_data_directory(data_dir: str) -> List[str]:
                     if pat.search(content):
                         violations.append(f"Secret pattern detected in {rel_path}")
 
-                file_violations, parsed_data = validate_json_deep_structure(rel_path, content)
+                file_violations, parsed_data = validate_json_deep_structure(data_norm_path, content)
                 violations.extend(file_violations)
 
                 if parsed_data:
@@ -867,7 +881,16 @@ def validate_data_directory(data_dir: str) -> List[str]:
                         expected_schema = parsed_data.get("schema_version")
                     elif f == "screener.json":
                         if "items" in parsed_data and isinstance(parsed_data["items"], list):
-                            screener_symbols = {item.get("symbol") for item in parsed_data["items"] if isinstance(item, dict) and item.get("symbol")}
+                            screener_symbols = {
+                                item.get("symbol")
+                                for item in parsed_data["items"]
+                                if isinstance(item, dict) and item.get("symbol")
+                            }
+                    elif rel_path.startswith("symbols/"):
+                        sym_in_file = parsed_data.get("symbol")
+                        expected_sym = f[:-5]
+                        if sym_in_file != expected_sym:
+                            violations.append(f"Symbol file {rel_path} contains mismatched symbol field '{sym_in_file}' (expected '{expected_sym}')")
             except Exception as e:
                 violations.append(f"Failed to read or parse {rel_path}: {e}")
 
@@ -894,7 +917,8 @@ def validate_data_directory(data_dir: str) -> List[str]:
         sf[:-5] for sf in os.listdir(symbols_dir) if sf.endswith(".json")
     } if os.path.isdir(symbols_dir) else set()
 
-    if screener_symbols and disk_symbols and screener_symbols != disk_symbols:
+    # Unconditional comparison
+    if screener_symbols != disk_symbols:
         if screener_symbols - disk_symbols:
             violations.append(f"Screener references missing symbol JSONs: {screener_symbols - disk_symbols}")
         if disk_symbols - screener_symbols:

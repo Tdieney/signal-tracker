@@ -5,23 +5,18 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 import time
 from typing import Callable, Dict, List, Optional, Sequence
 from pipeline.models import OHLCVRecord
-from pipeline.providers.base import BaseMarketDataProvider, ProviderFetchResult, ProviderHealth
+from pipeline.providers.base import (
+    BaseMarketDataProvider,
+    ProviderFetchResult,
+    ProviderHealth,
+    safe_date_label,
+    safe_symbol_label,
+)
 
 logger = logging.getLogger("vn_stock_signal.company_api_provider")
-
-
-def sanitize_symbol_string(sym: str) -> str:
-    """Sanitize symbol string to uppercase alphanumeric only (max 10 chars)."""
-    return re.sub(r"[^A-Z0-9]", "", str(sym).upper())[:10]
-
-
-def sanitize_date_string(date_val: str) -> str:
-    """Sanitize date string to YYYY-MM-DD format characters only."""
-    return re.sub(r"[^0-9\-]", "", str(date_val))[:10]
 
 
 class CompanyApiDataProvider(BaseMarketDataProvider):
@@ -94,9 +89,9 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
         input_rows = 0
         accepted_rows = 0
         rejected_rows = 0
-        target_symbols = [sanitize_symbol_string(s) for s in (symbols or [])]
-        clean_start = sanitize_date_string(start_date or "")
-        clean_end = sanitize_date_string(end_date or "")
+        target_symbols = list(symbols or [])
+        clean_start = safe_date_label(start_date) if start_date else ""
+        clean_end = safe_date_label(end_date) if end_date else ""
         sha = hashlib.sha256()
 
         api_key = os.environ.get(self.api_key_env_var, "")
@@ -114,9 +109,12 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
                 rejected_rows=0,
                 warnings=warnings,
                 payload_sha256=sha.hexdigest(),
+                is_complete=False,
+                provenance="unconfigured",
             )
 
         for sym in target_symbols:
+            sym_label = safe_symbol_label(sym)
             if not sym:
                 continue
 
@@ -128,38 +126,40 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
                 attempts_executed = attempt
                 try:
                     # Pass both start_date and end_date
-                    raw_items = self._fetch_fn(self.api_base_url, api_key, sym, clean_start, clean_end)
+                    raw_items = self._fetch_fn(self.api_base_url, api_key, sym_label, clean_start, clean_end)
                     break
                 except Exception:
                     raw_items = None
 
             if raw_items is None:
-                warnings.append(f"Failed to fetch data for symbol {sym} after {attempts_executed} attempt(s)")
+                warnings.append(f"Failed to fetch data for symbol {sym_label} after {attempts_executed} attempt(s)")
                 continue
 
             for item in raw_items:
                 input_rows += 1
                 try:
-                    date_str = sanitize_date_string(str(item.get("trading_date") or item.get("date") or ""))
+                    raw_date = str(item.get("trading_date") or item.get("date") or "")
+                    date_label = safe_date_label(raw_date)
                     open_val = float(item["open"])
                     high_val = float(item["high"])
                     low_val = float(item["low"])
                     close_val = float(item["close"])
                     vol_val = int(float(item.get("volume", 0)))
-                    ex_val = sanitize_symbol_string(str(item.get("exchange", "HOSE"))) or "HOSE"
+                    raw_ex = str(item.get("exchange", "HOSE")).upper()
+                    ex_val = raw_ex if raw_ex in ("HOSE", "HNX", "UPCOM") else "HOSE"
                     vn30_val = bool(item.get("in_vn30", False))
 
                     if not (open_val > 0 and high_val > 0 and low_val > 0 and close_val > 0 and vol_val >= 0):
                         rejected_rows += 1
-                        warnings.append(f"Non-positive OHLC price or invalid volume for symbol {sym} on date {date_str}")
+                        warnings.append(f"Non-positive OHLC price or invalid volume for symbol {sym_label} on date {date_label}")
                         continue
 
                     # Hash validated record data
-                    sha.update(f"{sym}:{date_str}:{open_val}:{high_val}:{low_val}:{close_val}:{vol_val}".encode("utf-8"))
+                    sha.update(f"{sym_label}:{date_label}:{open_val}:{high_val}:{low_val}:{close_val}:{vol_val}".encode("utf-8"))
 
                     rec = OHLCVRecord(
-                        trading_date=date_str,
-                        symbol=sym,
+                        trading_date=raw_date,
+                        symbol=sym_label,
                         exchange=ex_val,
                         open=open_val,
                         high=high_val,
@@ -172,7 +172,7 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
                     accepted_rows += 1
                 except (KeyError, ValueError, TypeError):
                     rejected_rows += 1
-                    warnings.append(f"Malformed price or volume record rejected for symbol {sym}")
+                    warnings.append(f"Malformed price or volume record rejected for symbol {sym_label}")
 
         return ProviderFetchResult(
             records=records,
@@ -182,4 +182,6 @@ class CompanyApiDataProvider(BaseMarketDataProvider):
             rejected_rows=rejected_rows,
             warnings=warnings,
             payload_sha256=sha.hexdigest(),
+            is_complete=False,
+            provenance="company_api_unverified",
         )

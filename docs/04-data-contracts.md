@@ -304,3 +304,20 @@ Frontend dùng metadata do pipeline tạo và calendar policy chung:
 - Weekend/ngày nghỉ không tự biến dataset phiên trước thành stale chỉ vì đã qua 24 giờ.
 
 Frontend hiển thị status do pipeline cung cấp, không tự đoán ngày giao dịch chỉ từ đồng hồ thiết bị. Nếu chưa có trading calendar đáng tin, pipeline dùng `UNKNOWN`; UI dùng wording thận trọng “Dữ liệu gần nhất là phiên …” và không tuyên bố “mới nhất thị trường”.
+
+## 12. Canonical dataset identity
+
+- `dataset_id` được tính toán thông qua băm SHA-256 (lấy 16 ký tự hexa đầu tiên) của một cấu trúc JSON canonical đã chuẩn hóa và sắp xếp thứ tự:
+  - `as_of_date`
+  - `provider`
+  - `universe`
+  - `quality_status`
+  - `eligible_count`
+  - `quality_metadata` (`input_rows`, `accepted_rows`, `rejected_rows`, `warnings`)
+  - `market_session_status`
+  - `freshness_status`
+  - `freshness_expected_as_of_date`
+  - `calendar_version`
+  - `records` (toàn bộ các dòng dữ liệu OHLCV hợp lệ, sắp xếp theo mã và ngày)
+- **Quy ước về Metadata Vận hành (Operational Metadata)**:
+  - Các trường mang tính thời điểm thực thi hoặc văn bản giải thích con người như `generated_at` và `freshness.reason` được coi là operational metadata và cố tình loại trừ khỏi chuỗi băm canonical để bảo đảm tính tất định (deterministic identity): hai lần build với cùng dữ liệu đầu vào và cùng `reference_time` sẽ cho ra `dataset_id` và cây thư mục byte-for-byte hoàn toàn đồng nhất.

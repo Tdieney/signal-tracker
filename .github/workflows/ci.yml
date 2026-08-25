@@ -17,6 +17,14 @@ jobs:
       # Pinned: actions/checkout@v7.0.1 (Node 24 runtime)
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+
+      - name: Check Committed Whitespace
+        run: |
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            git diff --check HEAD~1 HEAD
+          fi
 
       # Pinned: actions/setup-python@v6.3.0 (Node 24 runtime)
       - name: Set up Python

@@ -7,7 +7,13 @@ import hashlib
 import os
 from typing import List, Optional, Sequence
 from pipeline.models import OHLCVRecord
-from pipeline.providers.base import BaseMarketDataProvider, ProviderFetchResult, ProviderHealth
+from pipeline.providers.base import (
+    BaseMarketDataProvider,
+    ProviderFetchResult,
+    ProviderHealth,
+    safe_date_label,
+    safe_symbol_label,
+)
 
 
 class CsvDataProvider(BaseMarketDataProvider):
@@ -73,19 +79,21 @@ class CsvDataProvider(BaseMarketDataProvider):
                     if k is not None
                 }
 
-                date_str = cleaned_row.get("trading_date") or cleaned_row.get("date") or ""
+                raw_date = cleaned_row.get("trading_date") or cleaned_row.get("date") or ""
                 raw_sym = cleaned_row.get("symbol") or cleaned_row.get("ticker") or ""
-                sym = raw_sym.upper()[:10]  # sanitize symbol string length
                 ex = (cleaned_row.get("exchange") or "HOSE").upper()
 
-                if symbol_set and sym not in symbol_set:
-                    # Filtered out by caller symbol set; decrement source_rows_count so invariants hold
+                date_label = safe_date_label(raw_date)
+                sym_label = safe_symbol_label(raw_sym)
+
+                if symbol_set and sym_label not in symbol_set:
+                    # Filtered out by caller symbol set
                     self.source_rows_count -= 1
                     continue
-                if start_date and date_str < start_date:
+                if start_date and raw_date < start_date:
                     self.source_rows_count -= 1
                     continue
-                if end_date and date_str > end_date:
+                if end_date and raw_date > end_date:
                     self.source_rows_count -= 1
                     continue
 
@@ -98,7 +106,7 @@ class CsvDataProvider(BaseMarketDataProvider):
 
                     if not (open_str and high_str and low_str and close_str):
                         self.rejected_rows_count += 1
-                        self.parse_warnings.append(f"Row {row_idx}: Missing required OHLC price values for symbol {sym}")
+                        self.parse_warnings.append(f"Row {row_idx}: Missing required OHLC price values for symbol {sym_label}")
                         continue
 
                     open_val = float(open_str)
@@ -108,8 +116,7 @@ class CsvDataProvider(BaseMarketDataProvider):
                     volume_val = int(float(vol_str)) if vol_str else 0
                 except (ValueError, TypeError):
                     self.rejected_rows_count += 1
-                    # Sanitized warning: do not dump raw unparsed payload or raw exception text
-                    self.parse_warnings.append(f"Row {row_idx}: Non-numeric OHLC price or volume field for symbol {sym}")
+                    self.parse_warnings.append(f"Row {row_idx}: Non-numeric OHLC price or volume field for symbol {sym_label}")
                     continue
 
                 adj_close_str = cleaned_row.get("adjusted_close") or cleaned_row.get("adj_close")
@@ -118,8 +125,7 @@ class CsvDataProvider(BaseMarketDataProvider):
                     try:
                         adj_close = float(adj_close_str)
                     except (ValueError, TypeError):
-                        # Row is accepted with None, but sanitized warning is recorded
-                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional adjusted_close field for symbol {sym}")
+                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional adjusted_close field for symbol {sym_label}")
 
                 val_str = cleaned_row.get("trading_value") or cleaned_row.get("value")
                 trading_val = None
@@ -127,14 +133,14 @@ class CsvDataProvider(BaseMarketDataProvider):
                     try:
                         trading_val = float(val_str)
                     except (ValueError, TypeError):
-                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional trading_value field for symbol {sym}")
+                        self.parse_warnings.append(f"Row {row_idx}: Invalid optional trading_value field for symbol {sym_label}")
 
                 vn30_str = cleaned_row.get("in_vn30", "").lower()
                 in_vn30 = vn30_str in ("true", "1", "yes", "t")
 
                 rec = OHLCVRecord(
-                    trading_date=date_str,
-                    symbol=sym,
+                    trading_date=raw_date,
+                    symbol=raw_sym.upper(),
                     exchange=ex,
                     open=open_val,
                     high=high_val,
@@ -156,4 +162,6 @@ class CsvDataProvider(BaseMarketDataProvider):
             rejected_rows=self.rejected_rows_count,
             warnings=list(self.parse_warnings),
             payload_sha256=sha.hexdigest(),
+            is_complete=False,
+            provenance="fixture",
         )

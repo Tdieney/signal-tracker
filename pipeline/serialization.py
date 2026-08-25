@@ -87,9 +87,24 @@ def validate_target_directory(
         raise FilesystemSafetyError(f"Dangerous target path rejected (repository root directory): {path}")
 
     # Check if path is within workspace or allowed temporary directory
-    temp_dir = os.path.realpath(tempfile.gettempdir())
-    is_in_workspace = real_path.startswith(workspace_root + os.sep)
-    is_in_temp = allow_temp and real_path.startswith(temp_dir + os.sep)
+    temp_dir = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
+    norm_ws = os.path.normcase(workspace_root)
+    norm_real = os.path.normcase(real_path)
+
+    is_in_workspace = False
+    try:
+        if os.path.commonpath([norm_ws, norm_real]) == norm_ws and norm_real != norm_ws:
+            is_in_workspace = True
+    except ValueError:
+        pass
+
+    is_in_temp = False
+    if allow_temp:
+        try:
+            if os.path.commonpath([temp_dir, norm_real]) == temp_dir and norm_real != temp_dir:
+                is_in_temp = True
+        except ValueError:
+            pass
 
     if not is_in_workspace and not is_in_temp:
         raise FilesystemSafetyError(
@@ -101,17 +116,20 @@ def validate_target_directory(
 
 def validate_no_directory_overlap(staging_path: str, output_path: str) -> None:
     """Ensure staging and output directories do not overlap or equal each other."""
-    s_real = os.path.realpath(os.path.abspath(staging_path))
-    o_real = os.path.realpath(os.path.abspath(output_path))
+    s_real = os.path.normcase(os.path.realpath(os.path.abspath(staging_path)))
+    o_real = os.path.normcase(os.path.realpath(os.path.abspath(output_path)))
 
     if s_real == o_real:
         raise FilesystemSafetyError(f"Staging directory cannot be identical to output directory: {staging_path}")
 
-    if s_real.startswith(o_real + os.sep):
-        raise FilesystemSafetyError(f"Staging directory cannot be inside output directory: {staging_path} in {output_path}")
+    try:
+        common = os.path.commonpath([s_real, o_real])
+    except ValueError:
+        # Different drives on Windows (disjoint by definition)
+        return
 
-    if o_real.startswith(s_real + os.sep):
-        raise FilesystemSafetyError(f"Output directory cannot be inside staging directory: {output_path} in {staging_path}")
+    if common == o_real or common == s_real:
+        raise FilesystemSafetyError(f"Staging directory and output directory cannot overlap: {staging_path} and {output_path}")
 
 
 def sanitize_value(val: Any) -> Any:

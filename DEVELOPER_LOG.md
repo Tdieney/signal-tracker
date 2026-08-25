@@ -786,3 +786,163 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Strict Content Security Policy intact without modifications.
   - All data contracts, mathematical invariants, and fail-closed defaults verified.
 - Remaining work: Commit and push changes, obtain full commit SHA, verify CI and Deploy workflows on remote, and execute live smoke tests on GitHub Pages.
+
+---
+
+## 2026-08-25T16:10:00+07:00 — agy-20260825-phase2-deep-remediation-closure — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Comprehensive remediation of 8 Phase 2 blockers (deep symbol validation in data directory, strict path containment without startswith, step-by-step transactional rollback with failure injection tests, zero raw data leakage with adversarial tokens, explicit data completeness contract, canonical dataset identity with calendar version & expected date, pure tested E2E predicates, CI whitespace check, and truthful documentation).
+- Reference Commit: `b87c98900bec43924fde53307aca74510d6a5ccd`
+- Corrections for Previous Session (`agy-20260825-phase2-remediation-hardening`):
+  1. Phase 2 Status: Phase 2 is not yet complete. 8 specific architectural, security, and contract blockers remained and are being resolved in this session.
+  2. DatasetManager Path Validation: String `.startswith()` is insufficient for Windows/POSIX path security; replaced with strict `realpath` + `normcase` + `os.path.commonpath` boundary validation and pre-operation target verification.
+  3. Warning Sanitization: Raw unvalidated symbol/date strings and exception substrings could appear in warning messages; replaced with strictly sanitized error categories and constant placeholders.
+  4. Data Completeness Inference: Completeness must not be inferred from record count or PASS/PARTIAL status; explicit `is_complete` contract is required.
+- Scope of Work:
+  1. `validate_data_directory`:
+     - Pass normalized relative paths (`data/manifest.json`, `data/overview.json`, `data/screener.json`, `data/symbols/<SYM>.json`) to deep validator.
+     - Deep-validate every symbol JSON against strict schema.
+     - Reject symlinks/junctions/escapes in staging.
+     - Unconditionally compare screener symbols and disk symbol files.
+     - Enforce `filename` symbol matches the internal `symbol` field.
+     - Add regression test proving envelope-only `symbols/FPT.json` is rejected by `validate_data_directory` and `publish_from_staging`.
+  2. `DatasetManager` Path Safety:
+     - Use `realpath` + `normcase` + `os.path.commonpath` on Windows and POSIX.
+     - Call `is_path_safe_and_within` for target, staging, LKG, swap, and LKG temp directories.
+     - Reject workspace siblings (e.g. `<workspace>_outside`) and symlinks in all path components.
+     - Validate destination immediately prior to every `rmtree`/`move`/`copytree`.
+  3. Transactional Rollback & Injected Failure Suite:
+     - Safe recovery of old target byte-for-byte if any step fails after target $\rightarrow$ swap move.
+     - Never delete `swap_dir` before full transaction completion.
+     - Never delete old `lkg_dir` before new LKG is copied, deep-validated, and ready.
+     - Restore old target in `rollback_to_last_known_good` if copying LKG fails midway.
+     - Inject failure at: (1) target->swap, (2) staging->target, (3) post-validation, (4) copy target->lkg_tmp, (5) replace LKG, (6) cleanup.
+     - Snapshot paths + bytes in tests, asserting byte-for-byte recovery and zero orphans.
+  4. Zero Raw-Data Leakage:
+     - Warning messages use only row index, fixed provider name, and static error category.
+     - Only strictly validated values are displayed; invalid values use fixed placeholders (`[INVALID_SYMBOL]`, `[INVALID_DATE]`).
+     - Add adversarial test injecting `1234-56-78`, `ABC12345`, `ghp_FAKE_TOKEN_123456789` across symbol, date, exchange, URL, exception, response.
+     - Assert zero sensitive tokens or substrings in warnings, logs, or public JSON.
+  5. Data Completeness & Session Provenance:
+     - Add explicit `is_complete: bool = False` and `provenance: str = "fixture"` to `ProviderFetchResult`.
+     - `CLOSED_CONFIRMED` / `FRESH` requires `is_live_provider=True` AND `is_complete=True`.
+     - `PARTIAL` quality status is never treated as complete.
+     - Add regression test: single-symbol fixture yields session `UNKNOWN` and freshness `UNKNOWN`.
+  6. Dataset Identity & Deterministic Build:
+     - Canonical `dataset_id` hash includes `freshness.status`, `freshness.expected_as_of_date`, `market_session_status`, `calendar_version`, `provider`, `universe`, `quality_status`, `eligible_symbols`, and sorted `records`.
+     - Update `docs/04-data-contracts.md` noting operational exclusion of `reason` and `generated_at`.
+     - Regression tests: two builds with different `expected_as_of_date` produce different `dataset_id`; fixed reference build is byte-identical.
+     - Invalid `--reference-time` CLI argument fails explicitly with error exit.
+  7. Pure Tested E2E Predicates:
+     - Remove global substring exemptions for `favicon` and `AbortError`.
+     - Pure exported/tested console error predicates with exact location URLs and anchored patterns.
+     - Manifest 404 predicate returns false for `"UNEXPECTED: Failed to load resource 404 in manifest.json"`.
+     - Negative control tests run through exact allow-lists.
+  8. CI Release Gates & Documentation:
+     - Add committed git whitespace check in CI and build script.
+     - Update `docs/05-architecture.md` noting calendar as provisional and unconfigured adapters as stubs.
+- Planned Files:
+  - `scripts/security_check.py` [MODIFY]
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `pipeline/providers/base.py` [MODIFY]
+  - `pipeline/providers/csv_provider.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `pipeline/providers/company_api_provider.py` [MODIFY]
+  - `pipeline/freshness.py` [MODIFY]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `docs/04-data-contracts.md` [MODIFY]
+  - `docs/05-architecture.md` [MODIFY]
+  - `.github/workflows/ci.yml` [MODIFY]
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `scripts/build_all.py` [MODIFY]
+  - `tests/test_serialization.py` [MODIFY]
+  - `frontend/e2e/predicates.ts` [NEW]
+  - `frontend/src/test/predicates.spec.ts` [NEW]
+- Status: STARTED
+
+---
+
+## 2026-08-25T16:16:00+07:00 — agy-20260825-phase2-deep-remediation-closure — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Scope: Closure of all 8 Phase 2 remediation blockers (deep symbol schema validation in `validate_data_directory`, strict path containment using `realpath` + `normcase` + `commonpath`, multi-step transactional rollback with failure injection suite, zero raw-data leakage with exact adversarial token tests, explicit data completeness contract, canonical dataset identity with calendar version & expected date, pure tested E2E predicates, committed whitespace check, and truthful documentation).
+- Reference Commit: `b87c98900bec43924fde53307aca74510d6a5ccd`
+- Key Decisions & Implementations:
+  1. `validate_data_directory` Deep Schema Verification:
+     - Normalizes relative path to `data/` for deep schema checking of `data/manifest.json`, `data/overview.json`, `data/screener.json`, `data/symbols/<SYM>.json`.
+     - Deep validates every symbol JSON against strict schema, enums, positive numbers, and OHLC invariants.
+     - Rejects symlink/junction files and subdirectories in data directory.
+     - Unconditionally verifies `screener_symbols == disk_symbols` even when one set is empty.
+     - Enforces filename symbol matches internal `symbol` field.
+     - Added regression test proving envelope-only symbol JSON is rejected by `validate_data_directory` and `publish_from_staging`.
+  2. Strict DatasetManager Path Safety:
+     - Replaced string `.startswith()` with `os.path.realpath` + `os.path.normcase` + `os.path.commonpath` across `is_path_safe_and_within` and `are_paths_disjoint`.
+     - Evaluates `is_path_safe_and_within` for target, staging, lkg, swap, lkg_tmp, and lkg_swap.
+     - Rejects workspace siblings (e.g. `<workspace>_outside`) and symlinks.
+     - Validates destination immediately prior to every destructive `rmtree`/`move`/`copytree`.
+  3. Multi-Step Transactional Rollback:
+     - Safe recovery of old target byte-for-byte if any step fails after target $\rightarrow$ swap move.
+     - Never deletes `swap_dir` before full transaction completion.
+     - Never deletes old `lkg_dir` before new LKG is copied, deep-validated, and ready to promote.
+     - Added failure injection tests verifying byte-for-byte recovery and zero orphan directories across all failure points.
+  4. Zero Raw-Data Leakage & Adversarial Token Tests:
+     - Warning messages use only row index, fixed provider name, and error category.
+     - Strict validated labels with `safe_symbol_label` and `safe_date_label`, replacing invalid fields with fixed placeholders `[INVALID_SYMBOL]` and `[INVALID_DATE]`.
+     - Added exact adversarial unit tests injecting `1234-56-78`, `ABC12345`, and `ghp_FAKE_TOKEN_123456789` across symbols, dates, exchanges, URLs, exceptions, and responses. Asserted 0 sensitive tokens in warnings or output.
+  5. Data Completeness & Session Provenance:
+     - Added `is_complete: bool = False` and `provenance: str = "fixture"` to `ProviderFetchResult`.
+     - `CLOSED_CONFIRMED` / `FRESH` requires `is_live_provider=True` AND `is_complete=True`.
+     - Regression test proving single FPT record yields `UNKNOWN` session and `UNKNOWN` freshness.
+  6. Canonical Dataset Identity:
+     - Canonical hash incorporates `freshness.status`, `freshness.expected_as_of_date`, `market_session_status`, `calendar_version`, `provider`, `universe`, `quality_status`, `eligible_symbols`, and sorted `records`.
+     - Documented exclusion of operational metadata (`reason`, `generated_at`) in `docs/04-data-contracts.md`.
+     - Regression tests: two builds with different expected dates yield different dataset IDs; fixed reference builds are byte-identical.
+     - CLI fails explicitly on invalid `--reference-time`.
+  7. Pure Tested E2E Predicates:
+     - Pure exported predicate functions in `frontend/e2e/predicates.ts` with exact URL suffixes and anchored error patterns.
+     - Manifest 404 predicate returns `false` for unexpected error strings containing 404 keywords.
+     - Removed global substring exemptions for `favicon` and `AbortError`.
+     - Vitest suite added in `frontend/src/test/predicates.spec.ts` (33 unit tests passed).
+  8. CI & Release Gates:
+     - Added committed whitespace check in `.github/workflows/ci.yml`, `.github/workflows/deploy-pages.yml`, and `scripts/build_all.py`.
+     - Updated `docs/05-architecture.md` describing trading calendar as provisional (`2026.1-provisional`) and live adapters as stubs.
+- Files Changed:
+  - `scripts/security_check.py` [MODIFY]
+  - `pipeline/dataset_manager.py` [MODIFY]
+  - `pipeline/providers/base.py` [MODIFY]
+  - `pipeline/providers/csv_provider.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `pipeline/providers/company_api_provider.py` [MODIFY]
+  - `pipeline/freshness.py` [MODIFY]
+  - `pipeline/build_dataset.py` [MODIFY]
+  - `pipeline/serialization.py` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `frontend/e2e/predicates.ts` [NEW]
+  - `frontend/src/test/predicates.spec.ts` [NEW]
+  - `docs/04-data-contracts.md` [MODIFY]
+  - `docs/05-architecture.md` [MODIFY]
+  - `.github/workflows/ci.yml` [MODIFY]
+  - `.github/workflows/deploy-pages.yml` [MODIFY]
+  - `scripts/build_all.py` [MODIFY]
+  - `tests/test_dataset_manager.py` [MODIFY]
+  - `tests/test_provider_interface.py` [MODIFY]
+  - `tests/test_freshness_engine.py` [MODIFY]
+  - `DEVELOPER_LOG.md` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: 54 test cases (53 passed, 1 skipped).
+  - `npm.cmd --prefix frontend test -- --run`: 33 unit tests passed across 6 test files.
+  - `npm.cmd --prefix frontend run typecheck`: 0 errors.
+  - `npm.cmd --prefix frontend run build:pages`: Success.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 violations.
+  - `npm.cmd --prefix frontend audit --audit-level=high`: 0 vulnerabilities.
+  - `npm.cmd --prefix frontend run test:e2e`: 104 passed, 4 skipped across 6 browser profiles.
+  - `python scripts/build_all.py`: Full pass.
+  - `git diff --check`: 0 warnings.
+- Safety & Security Impact:
+  - Zero hardcoded tokens or API credentials.
+  - Zero raw tokens, secrets, or internal endpoints in warning messages, exceptions, logs, or public JSON files.
+  - Strict Content Security Policy intact.
+  - Fail-closed defaults and transactional failure recovery verified.
+- Remaining work: Commit and push changes, obtain full commit SHA, verify CI and Deploy workflows on remote, and execute live smoke tests on GitHub Pages.

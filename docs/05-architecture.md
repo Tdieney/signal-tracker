@@ -132,23 +132,25 @@ GitHub Actions chạy pipeline và build; browser chỉ tải static assets/JSON
 ### Provider Interface (`pipeline/providers/base.py`)
 - `fetch_ohlcv(...) -> ProviderFetchResult`: trả về kết quả chuẩn hóa kèm đầy đủ hạch toán chất lượng:
   $$\text{input\_rows} = \text{accepted\_rows} + \text{rejected\_rows}$$
+  kèm cờ `is_complete` và `provenance`.
 - `fetch_records(...) -> List[OHLCVRecord]`: method tiện lợi trả về danh sách bản ghi đã được validate.
 - `health_check() -> ProviderHealth`: kiểm tra khả năng kết nối non-destructive.
+- **Trạng thái Adapters**: `VnstockDataProvider` và `CompanyApiDataProvider` hiện là các khung kết nối (architectural stubs) an toàn, trả về `is_healthy=False` khi chưa có cấu hình client/endpoint thực tế, tránh tạo ấn tượng sai lệch về nguồn cấp dữ liệu trực tiếp khi chưa có bản quyền hoặc tích hợp chính thức.
 
 ### Lịch giao dịch & Đánh giá Freshness (`pipeline/freshness.py`)
-- **Phạm vi hỗ trợ**: 2025–2027 (phiên bản `2026.1`, nguồn: Quy định giao dịch HOSE/HNX và Bộ luật Lao động Việt Nam).
+- **Phạm vi hỗ trợ**: 2025–2027 (phiên bản `2026.1-provisional`, nguồn: Định nghĩa lịch tạm thời dựa trên Quy chế giao dịch HOSE/HNX và các ngày nghỉ lễ theo Bộ luật Lao động Việt Nam; cần đồng bộ quy định hàng năm).
 - **Nguyên tắc Fail-Closed**: Các ngày nằm ngoài phạm vi 2025–2027 đều được phân loại là không phải ngày giao dịch / trạng thái `UNKNOWN`.
-- **Điều kiện `CLOSED_CONFIRMED`**: Chỉ trả về `CLOSED_CONFIRMED` khi:
+- **Điều kiện `CLOSED_CONFIRMED` / `FRESH`**: Chỉ trả về `CLOSED_CONFIRMED` hoặc `FRESH` khi:
   1. Đang chạy với live market data provider (`is_live_provider=True`);
-  2. Dữ liệu đã được cập nhật đầy đủ và hợp lệ (`has_complete_data=True`);
+  2. Dữ liệu đã được xác nhận đầy đủ coverage theo universe và session (`is_complete=True`);
   3. Thời gian tham chiếu đã qua mốc 15:30 (kết thúc phiên khớp lệnh định kỳ đóng cửa và thanh toán bù trừ) của một ngày giao dịch hợp lệ.
 - **Reference Time Injection**: Hỗ trợ truyền tham số `reference_time` để đảm bảo 100% tính lặp lại (reproducibility) trong kiểm thử và build cố định.
 
 ### Staging & Dataset Manager (`pipeline/dataset_manager.py`)
 1. Tạo thư mục staging `.staging_data` sạch.
-2. Kiểm tra sâu toàn bộ file JSON, schema, enum, bất biến toán học và cross-file consistency.
-3. Kiểm tra ranh giới an toàn: thư mục staging, target, LKG và swap phải nằm hoàn toàn trong workspace và tách biệt nhau (disjoint).
-4. Atomic move staging $\rightarrow$ target. Nếu có lỗi xác thực sau khi move, tự động rollback về phiên bản trước mà không để lại orphan directories.
+2. Kiểm tra sâu toàn bộ file JSON, schema, enum, bất biến toán học và cross-file consistency (`validate_data_directory`).
+3. Kiểm tra ranh giới an toàn: thư mục staging, target, LKG và swap phải nằm hoàn toàn trong workspace (`realpath` + `normcase` + `commonpath`) và tách biệt nhau (disjoint).
+4. Transactional rollback: Di chuyển an toàn staging $\rightarrow$ target. Nếu có lỗi xác thực sau khi chuyển hoặc trong quá trình cập nhật LKG, tự động rollback phục hồi byte-for-byte về phiên bản trước mà không để lại orphan directories.
 5. Cập nhật bản sao `.lkg_data` để phục vụ khôi phục nhanh tại chỗ.
 
 ---

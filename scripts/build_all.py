@@ -16,6 +16,9 @@ def run_step(cmd: list[str], description: str) -> None:
 
 
 def main() -> None:
+    # 0. Check for whitespace errors
+    run_step(["git", "diff", "--check"], "Check for trailing whitespace errors")
+
     # 1. Build dataset JSON files from CSV fixture with fixed deterministic generated-at
     run_step(
         [

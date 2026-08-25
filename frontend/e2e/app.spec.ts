@@ -1,18 +1,11 @@
 import { test, expect, Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-
-export interface PageListenerFilter {
-  isAllowedConsole?: (msgText: string, locationUrl?: string) => boolean;
-  isAllowedPageError?: (errMessage: string) => boolean;
-  isAllowedRequestFailed?: (url: string, errorText?: string) => boolean;
-}
-
-// Factored and testable predicate helpers
-export const createExactRequestFailedPredicate = (expectedUrlSuffix: string) => {
-  return (url: string, _errorText?: string): boolean => {
-    return url.endsWith(expectedUrlSuffix);
-  };
-};
+import {
+  PageListenerFilter,
+  createExactRequestFailedPredicate,
+  isStandardBrowser404Console,
+  isManifest404AllowedConsole,
+} from './predicates';
 
 // Helper to attach CSP violation, console error, and request failure listeners with strict predicates
 async function setupPageListeners(
@@ -33,10 +26,7 @@ async function setupPageListeners(
     if (msg.type() === 'error') {
       const text = msg.text();
       const locationUrl = msg.location()?.url;
-      const isAllowed =
-        (filter?.isAllowedConsole && filter.isAllowedConsole(text, locationUrl)) ||
-        text.includes('favicon.ico') ||
-        text.includes('AbortError');
+      const isAllowed = filter?.isAllowedConsole && filter.isAllowedConsole(text, locationUrl);
       if (!isAllowed) {
         errors.push(`Console error: ${text}`);
       }
@@ -54,8 +44,7 @@ async function setupPageListeners(
     const url = req.url();
     const errorText = req.failure()?.errorText;
     const isAllowed =
-      (filter?.isAllowedRequestFailed && filter.isAllowedRequestFailed(url, errorText)) ||
-      url.includes('favicon');
+      filter?.isAllowedRequestFailed && filter.isAllowedRequestFailed(url, errorText);
     if (!isAllowed) {
       errors.push(`Failed network request: ${url} (${errorText})`);
     }
@@ -419,11 +408,7 @@ test.describe('VN Stock Signal — Production E2E, CSP & Accessibility Suite', (
     const errors: string[] = [];
     await setupPageListeners(page, errors, {
       isAllowedRequestFailed: createExactRequestFailedPredicate('/data/manifest.json'),
-      isAllowedConsole: (text, locationUrl) =>
-        /Failed to load resource.*404/.test(text) ||
-        (locationUrl ? locationUrl.includes('manifest.json') : false) ||
-        text.includes('manifest.json') ||
-        text.includes('Không thể tải dữ liệu'),
+      isAllowedConsole: isManifest404AllowedConsole,
     });
 
     await page.route('**/data/manifest.json', (route) =>

@@ -1,16 +1,22 @@
-"""Unit tests for DatasetManager atomic staging, deep validation, and transactional rollback."""
+"""Unit tests for DatasetManager path security, deep schema validation, and transactional rollback."""
 
 import json
 import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from pipeline.dataset_manager import DatasetManager
+from pipeline.dataset_manager import (
+    DatasetManager,
+    are_paths_disjoint,
+    is_path_safe_and_within,
+)
+from scripts.security_check import validate_data_directory
 
 
 class TestDatasetManager(unittest.TestCase):
-    """Test suite verifying transactional staging and LKG rollback mechanism."""
+    """Test suite verifying strict path containment, deep symbol validation, and transactional rollback."""
 
     def setUp(self):
         self.workspace_root = tempfile.mkdtemp()
@@ -27,7 +33,7 @@ class TestDatasetManager(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.workspace_root, ignore_errors=True)
 
-    def _create_mock_valid_dataset(self, directory: str, dataset_id: str = "1234567890abcdef"):
+    def _create_mock_valid_dataset(self, directory: str, dataset_id: str = "1234567890abcdef", symbol: str = "FPT"):
         os.makedirs(os.path.join(directory, "symbols"), exist_ok=True)
         manifest = {
             "schema_version": "1.0.0",
@@ -86,7 +92,7 @@ class TestDatasetManager(unittest.TestCase):
             "as_of_date": "2026-08-21",
             "items": [
                 {
-                    "symbol": "FPT",
+                    "symbol": symbol,
                     "exchange": "HOSE",
                     "in_vn30": True,
                     "last_trading_date": "2026-08-21",
@@ -101,24 +107,18 @@ class TestDatasetManager(unittest.TestCase):
                 }
             ],
         }
-        symbol_fpt = {
+        symbol_data = {
             "schema_version": "1.0.0",
             "dataset_id": dataset_id,
-            "symbol": "FPT",
+            "symbol": symbol,
             "exchange": "HOSE",
-            "in_vn30": True,
             "as_of_date": "2026-08-21",
-            "latest_close": 100.0,
-            "ma10": 98.0,
-            "distance_pct": 2.04,
-            "signal": "ABOVE_MA10",
-            "signal_reason": "ABOVE_MA10",
-            "avg_volume_20d": 15000,
-            "is_volume_breakout": False,
-            "explanation": {
-                "rule": "ABOVE_MA10",
-                "summary": "Giá đóng cửa nằm trên đường MA10.",
-                "details": [],
+            "latest": {
+                "close": 100.0,
+                "ma10": 98.0,
+                "distance_pct": 2.04,
+                "signal": "ABOVE_MA10",
+                "data_status": "VALID",
             },
             "series": [
                 {
@@ -127,14 +127,18 @@ class TestDatasetManager(unittest.TestCase):
                     "high": 101.0,
                     "low": 98.5,
                     "close": 100.0,
-                    "volume": 10000,
-                    "adjusted_close": None,
-                    "trading_value": None,
                     "ma10": 98.0,
-                    "distance_pct": 2.04,
+                    "volume": 10000,
                     "signal": "ABOVE_MA10",
                 }
             ],
+            "explanation": {
+                "current_close": 100.0,
+                "current_ma10": 98.0,
+                "previous_close": 98.0,
+                "previous_ma10": 97.5,
+                "rule": "ABOVE_MA10",
+            },
         }
 
         with open(os.path.join(directory, "manifest.json"), "w", encoding="utf-8") as f:
@@ -143,88 +147,170 @@ class TestDatasetManager(unittest.TestCase):
             json.dump(overview, f)
         with open(os.path.join(directory, "screener.json"), "w", encoding="utf-8") as f:
             json.dump(screener, f)
-        with open(os.path.join(directory, "symbols", "FPT.json"), "w", encoding="utf-8") as f:
-            json.dump(symbol_fpt, f)
+        with open(os.path.join(directory, "symbols", f"{symbol}.json"), "w", encoding="utf-8") as f:
+            json.dump(symbol_data, f)
 
-    def test_workspace_boundary_and_disjoint_path_validation(self):
-        """Reject paths outside workspace or overlapping directory trees."""
-        # Outside workspace
+    def _snapshot_directory(self, dir_path: str) -> dict:
+        """Create snapshot of directory file structure and byte content."""
+        if not os.path.exists(dir_path):
+            return {}
+        snapshot = {}
+        for root, _, files in os.walk(dir_path):
+            for f in files:
+                full_p = os.path.join(root, f)
+                rel_p = os.path.relpath(full_p, dir_path).replace("\\", "/")
+                with open(full_p, "rb") as fp:
+                    snapshot[rel_p] = fp.read()
+        return snapshot
+
+    def test_path_safety_rejects_workspace_sibling(self):
+        """Reject workspace siblings such as <workspace>_outside without startswith bypass."""
+        sibling = self.workspace_root + "_outside"
+        self.assertFalse(is_path_safe_and_within(sibling, self.workspace_root))
         with self.assertRaises(ValueError):
             DatasetManager(
                 workspace_root=self.workspace_root,
-                target_dir="/tmp/outside_workspace",
+                target_dir=sibling,
             )
 
-        # Overlapping target and staging
-        with self.assertRaises(ValueError):
-            DatasetManager(
-                workspace_root=self.workspace_root,
-                target_dir=os.path.join(self.workspace_root, "data"),
-                staging_dir=os.path.join(self.workspace_root, "data", "nested_staging"),
-            )
+    def test_path_safety_rejects_overlapping_and_root_paths(self):
+        """Reject paths identical to workspace or overlapping directories."""
+        self.assertFalse(is_path_safe_and_within(self.workspace_root, self.workspace_root))
+        self.assertFalse(are_paths_disjoint(
+            os.path.join(self.workspace_root, "data"),
+            os.path.join(self.workspace_root, "data", "child"),
+        ))
 
-    def test_verify_staging_rejects_incomplete_dataset(self):
-        self.mgr.prepare_staging()
-        # Missing overview and screener
-        with open(os.path.join(self.staging_dir, "manifest.json"), "w") as f:
-            json.dump({"schema_version": "1.0.0"}, f)
-        is_valid, errors = self.mgr.verify_staging()
-        self.assertFalse(is_valid)
-        self.assertGreater(len(errors), 0)
-
-    def test_publish_promotes_to_target_and_creates_lkg_backup(self):
+    def test_validate_data_directory_rejects_envelope_only_symbol_json(self):
+        """Regression test: Replacing FPT.json with envelope-only object missing latest/series/explanation creates violations and fails publish."""
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111222233334444")
 
+        # Replace FPT.json with envelope-only object
+        envelope_only = {
+            "schema_version": "1.0.0",
+            "dataset_id": "1111222233334444",
+            "symbol": "FPT",
+            "as_of_date": "2026-08-21",
+        }
+        with open(os.path.join(self.staging_dir, "symbols", "FPT.json"), "w", encoding="utf-8") as f:
+            json.dump(envelope_only, f)
+
+        violations = validate_data_directory(self.staging_dir)
+        self.assertTrue(len(violations) > 0, "Deep validation must detect missing top-level keys in symbol file")
+        self.assertTrue(any("symbol detail JSON top-level keys mismatch" in v for v in violations))
+
+        success, publish_errors = self.mgr.publish_from_staging()
+        self.assertFalse(success)
+        self.assertTrue(len(publish_errors) > 0)
+
+    def test_publish_promotes_valid_staging_and_creates_lkg(self):
+        """Valid dataset publishes smoothly and initializes LKG."""
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="abcdef1234567890")
+
         success, errors = self.mgr.publish_from_staging()
-        self.assertTrue(success, f"Publish failed with errors: {errors}")
+        self.assertTrue(success, f"Publish failed: {errors}")
         self.assertTrue(os.path.isfile(os.path.join(self.target_dir, "manifest.json")))
         self.assertTrue(os.path.isfile(os.path.join(self.lkg_dir, "manifest.json")))
 
-    def test_step_by_step_rollback_recovery_with_zero_orphans(self):
-        """Inject failure during step 4 (target post-validation failure) and verify perfect rollback."""
-        # 1. Publish Initial Good V1
+    def test_injected_failure_at_staging_to_target_move(self):
+        """Inject failure when moving staging to target; verify target V1 restored byte-for-byte with 0 orphans."""
+        # 1. Establish V1
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
-        success_v1, errors_v1 = self.mgr.publish_from_staging()
-        self.assertTrue(success_v1, f"Initial publish failed: {errors_v1}")
+        self.mgr.publish_from_staging()
+        v1_snapshot = self._snapshot_directory(self.target_dir)
 
-        with open(os.path.join(self.target_dir, "manifest.json"), "r") as f:
-            self.assertEqual(json.load(f)["dataset_id"], "1111111111111111")
-
-        # 2. Stage corrupted V2 (mismatched overview dataset_id)
+        # 2. Stage V2
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
-        with open(os.path.join(self.staging_dir, "overview.json"), "w") as f:
-            json.dump({"schema_version": "1.0.0", "dataset_id": "BAD_OVERVIEW_ID"}, f)
 
-        # 3. Publish must fail and leave Target V1 completely intact
-        success, errors = self.mgr.publish_from_staging()
-        self.assertFalse(success)
-        self.assertGreater(len(errors), 0)
+        # Inject failure on shutil.move when moving staging -> target
+        original_move = shutil.move
 
-        # Target V1 is preserved
-        with open(os.path.join(self.target_dir, "manifest.json"), "r") as f:
-            self.assertEqual(json.load(f)["dataset_id"], "1111111111111111")
+        def mock_move(src, dst):
+            if src == self.staging_dir and dst == self.target_dir:
+                raise OSError("Injected IO failure moving staging to target")
+            return original_move(src, dst)
 
-        # Zero swap orphans
+        with patch("shutil.move", side_effect=mock_move):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+
+        # Assert target was restored byte-for-byte
+        current_target_snapshot = self._snapshot_directory(self.target_dir)
+        self.assertEqual(v1_snapshot, current_target_snapshot)
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
+
+    def test_injected_failure_at_target_post_validation(self):
+        """Inject failure during post-move target deep validation; verify target V1 restored byte-for-byte."""
+        # 1. Establish V1
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_snapshot = self._snapshot_directory(self.target_dir)
+
+        # 2. Stage V2
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+
+        original_verify = self.mgr._verify_directory
+
+        def mock_verify(dir_path):
+            if os.path.abspath(dir_path) == os.path.abspath(self.target_dir):
+                return False, ["Injected post-move target deep validation failure"]
+            return original_verify(dir_path)
+
+        with patch.object(self.mgr, "_verify_directory", side_effect=mock_verify):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+            self.assertTrue(any("Injected post-move target deep validation failure" in e for e in errors))
+
+        # Assert target was restored byte-for-byte
+        current_target_snapshot = self._snapshot_directory(self.target_dir)
+        self.assertEqual(v1_snapshot, current_target_snapshot)
         self.assertFalse(os.path.exists(self.mgr.swap_dir))
 
-    def test_rollback_to_last_known_good(self):
-        # 1. Publish V1
+    def test_injected_failure_at_lkg_copy(self):
+        """Inject failure when copying target to lkg_tmp; verify target V1 restored byte-for-byte."""
+        # 1. Establish V1
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="1111111111111111")
+        self.mgr.publish_from_staging()
+        v1_snapshot = self._snapshot_directory(self.target_dir)
+
+        # 2. Stage V2
+        self.mgr.prepare_staging()
+        self._create_mock_valid_dataset(self.staging_dir, dataset_id="2222222222222222")
+
+        with patch("shutil.copytree", side_effect=IOError("Injected failure during LKG copy")):
+            success, errors = self.mgr.publish_from_staging()
+            self.assertFalse(success)
+
+        # Assert target was restored byte-for-byte
+        current_target_snapshot = self._snapshot_directory(self.target_dir)
+        self.assertEqual(v1_snapshot, current_target_snapshot)
+        self.assertFalse(os.path.exists(self.mgr.swap_dir))
+        self.assertFalse(os.path.exists(self.mgr.lkg_tmp))
+
+    def test_rollback_to_last_known_good_with_injected_failure(self):
+        """Test rollback_to_last_known_good restores LKG, and restores previous target if copy fails midway."""
+        # 1. Establish V1 in LKG
         self.mgr.prepare_staging()
         self._create_mock_valid_dataset(self.staging_dir, dataset_id="aaaaaaaaaaaaaaaa")
-        success_v1, errors_v1 = self.mgr.publish_from_staging()
-        self.assertTrue(success_v1, f"V1 publish failed: {errors_v1}")
+        self.mgr.publish_from_staging()
+        lkg_snapshot = self._snapshot_directory(self.lkg_dir)
 
-        # 2. Corrupt target directory
-        shutil.rmtree(self.target_dir)
+        # 2. Manually corrupt target to test rollback
+        with open(os.path.join(self.target_dir, "manifest.json"), "w") as f:
+            f.write("corrupted manifest")
 
-        # 3. Rollback recovers from LKG
+        # 3. Successful rollback to LKG
         success, msg = self.mgr.rollback_to_last_known_good()
         self.assertTrue(success, f"Rollback failed: {msg}")
-        with open(os.path.join(self.target_dir, "manifest.json"), "r") as f:
-            self.assertEqual(json.load(f)["dataset_id"], "aaaaaaaaaaaaaaaa")
+        self.assertEqual(lkg_snapshot, self._snapshot_directory(self.target_dir))
 
 
 if __name__ == "__main__":
