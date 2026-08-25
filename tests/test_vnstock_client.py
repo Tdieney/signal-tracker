@@ -85,8 +85,6 @@ class TestVnstockMarketClient(unittest.TestCase):
         Demonstrates that input_rows == accepted_rows + rejected_rows invariant holds exactly
         when date filtering is applied.
         """
-        # Timestamps for dates:
-        # 2026-08-01, 2026-08-05, 2026-08-10, 2026-08-15, 2026-08-20
         d1 = int(datetime(2026, 8, 1, tzinfo=timezone.utc).timestamp())
         d2 = int(datetime(2026, 8, 5, tzinfo=timezone.utc).timestamp())
         d3 = int(datetime(2026, 8, 10, tzinfo=timezone.utc).timestamp())
@@ -117,6 +115,76 @@ class TestVnstockMarketClient(unittest.TestCase):
         self.assertEqual(result.rejected_rows, 3)
         self.assertEqual(result.input_rows, result.accepted_rows + result.rejected_rows)
         self.assertTrue(any("outside requested date range" in w for w in result.warnings))
+
+    def test_raw_row_accounting_with_overflow_and_extreme_timestamp(self):
+        """Adversarial test: Extreme timestamp (10**100) does not crash parser or provider;
+        input_rows == 2, accepted_rows == 1, rejected_rows == 1, and no raw value leakage."""
+        extreme_ts = 10**100
+        mock_payload = {
+            "t": [1787623200, extreme_ts],
+            "o": [71.5, 80.0],
+            "h": [72.0, 85.0],
+            "l": [70.7, 79.0],
+            "c": [70.7, 82.0],
+            "v": [4690000, 500000],
+        }
+
+        # 1. Test pure parser
+        bars = VnstockMarketClient.parse_raw_payload(mock_payload, "FPT")
+        self.assertEqual(len(bars), 2)
+        self.assertEqual(bars[0]["trading_date"], "2026-08-25")
+        self.assertIsNone(bars[1]["trading_date"])
+
+        # 2. Test provider accounting
+        client = VnstockMarketClient(fixture_fetcher=lambda sym: mock_payload)
+        provider = VnstockDataProvider(client=client)
+        result = provider.fetch_ohlcv(symbols=["FPT"])
+
+        self.assertEqual(result.input_rows, 2)
+        self.assertEqual(result.accepted_rows, 1)
+        self.assertEqual(result.rejected_rows, 1)
+        self.assertEqual(result.input_rows, result.accepted_rows + result.rejected_rows)
+
+        # 3. Verify zero raw timestamp leakage in warnings
+        for w in result.warnings:
+            self.assertNotIn(str(extreme_ts), w)
+            self.assertNotIn("1000000", w)
+
+    def test_provider_fetch_fn_with_non_dict_and_none_items(self):
+        """Adversarial test: fetch_fn returning None, strings, scalars, lists and a valid dict
+        does not crash with AttributeError and accounts for all input items correctly."""
+        dirty_items = [
+            None,
+            "corrupted_raw_string_payload_token_secret_123",
+            12345,
+            [1, 2, 3],
+            {
+                "trading_date": "2026-08-25",
+                "open": 71.0,
+                "high": 72.0,
+                "low": 70.5,
+                "close": 71.5,
+                "volume": 1000000,
+                "exchange": "HOSE",
+                "in_vn30": True,
+            },
+        ]
+
+        def mock_dirty_fetch(sym, s, e):
+            return dirty_items
+
+        provider = VnstockDataProvider(fetch_fn=mock_dirty_fetch)
+        result = provider.fetch_ohlcv(symbols=["FPT"])
+
+        self.assertEqual(result.input_rows, 5)
+        self.assertEqual(result.accepted_rows, 1)
+        self.assertEqual(result.rejected_rows, 4)
+        self.assertEqual(result.input_rows, result.accepted_rows + result.rejected_rows)
+
+        # Verify zero leakage of secret token in warnings
+        for w in result.warnings:
+            self.assertNotIn("corrupted_raw_string_payload_token_secret_123", w)
+            self.assertNotIn("12345", w)
 
     def test_array_length_mismatch_strict_accounting(self):
         """Verify array length mismatch is accounted as rejected rows with sanitized warnings."""

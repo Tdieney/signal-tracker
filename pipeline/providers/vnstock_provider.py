@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from collections.abc import Mapping
 from typing import Callable, Dict, List, Optional, Sequence
 from pipeline.models import OHLCVRecord, VN30_SYMBOLS
 from pipeline.providers.base import (
@@ -160,6 +161,11 @@ class VnstockDataProvider(BaseMarketDataProvider):
             for item in raw_items:
                 input_rows += 1
                 try:
+                    if not isinstance(item, (dict, Mapping)):
+                        rejected_rows += 1
+                        warnings.append("Malformed price or volume record rejected")
+                        continue
+
                     raw_date = str(item.get("trading_date") or item.get("date") or "")
                     if not raw_date or raw_date == "None":
                         rejected_rows += 1
@@ -214,7 +220,7 @@ class VnstockDataProvider(BaseMarketDataProvider):
                     records.append(rec)
                     accepted_rows += 1
                     symbol_accepted += 1
-                except (KeyError, ValueError, TypeError):
+                except (KeyError, ValueError, TypeError, AttributeError, OverflowError, OSError, Exception):
                     rejected_rows += 1
                     warnings.append("Malformed price or volume record rejected")
 

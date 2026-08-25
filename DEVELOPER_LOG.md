@@ -1488,3 +1488,50 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Zero calls to external financial market endpoints.
   - Live data provider permanently quarantined and fail-closed pending verified licence authorization.
   - Phase 3 remains officially PAUSED/BLOCKED.
+
+---
+
+## 2026-08-26T02:24:00+07:00 — agy-20260826-phase3-raw-row-accounting-hardening — STARTED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Forward-fix for two remaining raw-row accounting vulnerabilities:
+  1. Harden `pipeline/providers/vnstock_client.py`: Ensure `parse_raw_payload()` catches `ValueError`, `TypeError`, `OverflowError`, and `OSError` per raw row (e.g. timestamp out of bounds like 10**100) without crashing. Each malformed row produces a sanitized rejected record without leaking raw tokens/payloads. Zero network transport / urllib / endpoints added.
+  2. Harden `pipeline/providers/vnstock_provider.py`: Verify each item is a valid `Mapping` / dictionary before calling `.get()`. Items such as `None`, string, list, or scalar increment `rejected_rows += 1` with a generic sanitized warning and continue processing subsequent rows. Prevent `AttributeError` from crashing `fetch_ohlcv()`. Preserve `input_rows == accepted_rows + rejected_rows`.
+  3. Add regression tests for extreme timestamp overflow and non-dict items (`None`, scalars), proving `input_rows == accepted_rows + rejected_rows` and zero raw value leakage in warnings.
+  4. Preserve safe CSV demo dataset (`dataset_id="2ea695ca7b138940"`, `provider="csv"`, `freshness.status="UNKNOWN"`, `market_session_status="UNKNOWN"`), workflows without cron, and untracked diagnostics (`error.png`, `logs_88886054015*`).
+  5. Run all release gates (`unittest`, `build_dataset --provider vnstock` fail-closed check, `scripts/build_all.py`, `git diff --check`).
+  6. Commit explicit files, push to `origin/main`, monitor CI and Deploy workflows on exact commit SHA, verify live website, and report results.
+- Planned Files:
+  - `DEVELOPER_LOG.md` [MODIFY]
+  - `pipeline/providers/vnstock_client.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `tests/test_vnstock_client.py` [MODIFY]
+- Pre-existing working tree state: Exact commit `4c5715ea7e591c44d074bd05befa58948d97afdb`, untracked diagnostics (`error.png`, `logs_88886054015.zip`, `logs_88886054015/`) preserved.
+
+---
+
+## 2026-08-26T02:26:00+07:00 — agy-20260826-phase3-raw-row-accounting-hardening — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Forward-fix for two remaining raw-row accounting vulnerabilities:
+  1. Hardened `pipeline/providers/vnstock_client.py`: `parse_raw_payload()` catches `ValueError`, `TypeError`, `OverflowError`, and `OSError` per raw row (e.g. timestamp out of bounds like `10**100`) without crashing, returning sanitized malformed records for rejection accounting. Zero network transport / urllib / requests / endpoints added.
+  2. Hardened `pipeline/providers/vnstock_provider.py`: Verifies item is `Mapping` before calling `.get()`. Items such as `None`, strings, lists, or scalars increment `rejected_rows += 1` with a generic sanitized warning and continue processing subsequent rows. Prevents `AttributeError` from crashing `fetch_ohlcv()`. Preserves `input_rows == accepted_rows + rejected_rows`.
+  3. Added regression tests in `tests/test_vnstock_client.py`:
+     - `test_raw_row_accounting_with_overflow_and_extreme_timestamp`: verified 1 valid + 1 overflow row yields `input_rows=2, accepted_rows=1, rejected_rows=1`.
+     - `test_provider_fetch_fn_with_non_dict_and_none_items`: verified list with `None`, string, int, list, and valid dict yields `input_rows=5, accepted_rows=1, rejected_rows=4`.
+     - Verified zero leakage of raw timestamps or injected strings in warnings.
+  4. Preserved deterministic CSV demo dataset (`dataset_id="2ea695ca7b138940"`, `provider="csv"`, `freshness.status="UNKNOWN"`, `market_session_status="UNKNOWN"`), workflows without cron, and untracked diagnostics (`error.png`, `logs_88886054015*`).
+- Files Changed:
+  - `DEVELOPER_LOG.md` [MODIFY]
+  - `pipeline/providers/vnstock_client.py` [MODIFY]
+  - `pipeline/providers/vnstock_provider.py` [MODIFY]
+  - `tests/test_vnstock_client.py` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: 83 tests passed (82 passed, 1 skipped for OS symlink permission), 100% offline.
+  - `python pipeline/build_dataset.py --provider vnstock`: Exited with code 1 (fail closed).
+  - `python scripts/build_all.py`: All 10 master gate steps passed with exit code 0.
+  - `git diff --check`: 0 trailing whitespace warnings.
+- Safety, Security & Data Impact:
+  - Zero external market-data endpoint requests.
+  - Complete crash prevention against adversarial upstream inputs while maintaining exact accounting invariants.
+  - Phase 3 remains officially PAUSED/BLOCKED.

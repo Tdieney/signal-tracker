@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -81,10 +82,10 @@ class VnstockMarketClient:
         Returns a standardized dictionary for EVERY single raw row index, including:
         - valid rows (with trading_date, open, high, low, close, volume)
         - malformed rows (with _malformed_reason)
-        - date-tagged rows (so provider can count input_rows and apply date-filter accounting)
+        - out-of-range timestamp / type-error rows (handled gracefully without crashing)
         """
         clean_sym = symbol.strip().upper()
-        if not raw_payload or not isinstance(raw_payload, dict):
+        if not raw_payload or not isinstance(raw_payload, (dict, Mapping)):
             return []
 
         t_list = raw_payload.get("t") or []
@@ -140,7 +141,10 @@ class VnstockMarketClient:
                 continue
 
             try:
-                ts = int(t_list[i])
+                ts_val = t_list[i]
+                if ts_val is None or isinstance(ts_val, (dict, list)):
+                    raise TypeError("Invalid timestamp type")
+                ts = int(ts_val)
                 dt_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
                 open_p = float(o_list[i])
@@ -160,7 +164,7 @@ class VnstockMarketClient:
                     "volume": vol,
                     "in_vn30": in_vn30,
                 })
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError, OSError, Exception):
                 results.append({
                     "trading_date": None,
                     "symbol": clean_sym,
@@ -171,7 +175,7 @@ class VnstockMarketClient:
                     "close": None,
                     "volume": None,
                     "in_vn30": in_vn30,
-                    "_malformed_reason": "Type conversion error in raw record",
+                    "_malformed_reason": "Type conversion or value range error in raw record",
                 })
 
         return results
