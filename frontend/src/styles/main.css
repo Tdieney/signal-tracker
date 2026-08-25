@@ -1116,6 +1116,10 @@ button {
     align-items: flex-start;
     gap: var(--space-2);
   }
+  .preview-item-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
 }
 
 /* Extra Small mobile (<= 360px) responsive layout */
