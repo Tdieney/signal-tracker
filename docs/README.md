@@ -15,6 +15,7 @@ Trước khi đọc bộ tài liệu này, mọi coding agent MUST đọc `AGENT
 7. [07-testing-acceptance.md](07-testing-acceptance.md) — test plan và Definition of Done.
 8. [08-implementation-plan.md](08-implementation-plan.md) — trình tự code theo milestone.
 9. [AI-CODING-PROMPT.md](AI-CODING-PROMPT.md) — prompt giao toàn bộ việc triển khai cho coding agent.
+10. [AI_AUTONOMOUS_WORKFLOW.md](AI_AUTONOMOUS_WORKFLOW.md) — chuẩn mực quy trình vận hành tự trị cho AI coding agent.
 
 ## Quy tắc ưu tiên khi tài liệu mâu thuẫn
 

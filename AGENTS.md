@@ -6,7 +6,7 @@ These instructions apply to every AI/coding agent that reads, changes, tests, or
 
 Before making changes:
 
-1. Read `docs/README.md` and every document it marks as required, in order.
+1. Read `docs/README.md`, `docs/AI_AUTONOMOUS_WORKFLOW.md` and every document marked as required, in order.
 2. Read the latest entries in `DEVELOPER_LOG.md` so you do not repeat work or overwrite an unresolved decision.
 3. Inspect the working tree and preserve changes you did not create.
 

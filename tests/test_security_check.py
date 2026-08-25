@@ -102,7 +102,7 @@ class TestSecurityCheck(unittest.TestCase):
                 "volume": 1000,
                 "avg_volume_20d": 1000.0,
                 "signal": "ABOVE_MA10",
-                "signal_reason": "Price above MA10",
+                "signal_reason": "ABOVE_MA10",
                 "data_status": "VALID",
             }],
         }
@@ -119,7 +119,7 @@ class TestSecurityCheck(unittest.TestCase):
             "as_of_date": "2026-08-21",
             "latest": {"close": 100.0, "ma10": 98.0, "distance_pct": 2.04, "signal": "ABOVE_MA10", "data_status": "VALID"},
             "series": [{"trading_date": "2026-08-21", "open": 99.0, "high": 101.0, "low": 98.0, "close": 100.0, "ma10": 98.0, "volume": 1000, "signal": "ABOVE_MA10"}],
-            "explanation": {"current_close": 100.0, "current_ma10": 98.0, "previous_close": 98.0, "previous_ma10": 97.0, "rule": "Rule"},
+            "explanation": {"current_close": 100.0, "current_ma10": 98.0, "previous_close": 98.0, "previous_ma10": 97.0, "rule": "ABOVE_MA10"},
         }
         with open(os.path.join(symbols_dir, "FPT.json"), "w", encoding="utf-8") as f:
             json.dump(fpt, f)
@@ -277,7 +277,7 @@ class TestSecurityCheck(unittest.TestCase):
         violations, _ = validate_json_deep_structure("data/screener.json", json.dumps(bad_screener))
         self.assertTrue(any("close must be positive" in v for v in violations))
         self.assertTrue(any("volume must be non-negative" in v for v in violations))
-        self.assertTrue(any("signal_reason must be non-empty" in v for v in violations))
+        self.assertTrue(any("signal_reason must be one of" in v for v in violations))
 
         # 6. Symbol detail latest & explanation numeric validations
         bad_symbol = {
@@ -288,13 +288,13 @@ class TestSecurityCheck(unittest.TestCase):
             "as_of_date": "2026-08-21",
             "latest": {"close": -100.0, "ma10": 98.0, "distance_pct": 2.04, "signal": "ABOVE_MA10", "data_status": "VALID"},
             "series": [{"trading_date": "2026-08-21", "open": 99.0, "high": 101.0, "low": 98.0, "close": 100.0, "ma10": -5.0, "volume": 1000, "signal": "ABOVE_MA10"}],
-            "explanation": {"current_close": -100.0, "current_ma10": 98.0, "previous_close": 98.0, "previous_ma10": 97.0, "rule": ""},
+            "explanation": {"current_close": -100.0, "current_ma10": 98.0, "previous_close": 98.0, "previous_ma10": 97.0, "rule": "INVALID_RULE_NAME"},
         }
         violations, _ = validate_json_deep_structure("data/symbols/FPT.json", json.dumps(bad_symbol))
         self.assertTrue(any("latest.close must be positive" in v for v in violations))
         self.assertTrue(any("series[0].ma10 must be positive" in v for v in violations))
+        self.assertTrue(any("explanation.rule must be one of" in v for v in violations))
         self.assertTrue(any("explanation.current_close must be positive" in v for v in violations))
-        self.assertTrue(any("explanation.rule must be non-empty" in v for v in violations))
 
     def test_secret_scanner_detects_secrets_and_rejects_bypass_attempts(self):
         """Test that secret scanning cannot be bypassed via content comments or loose filenames."""

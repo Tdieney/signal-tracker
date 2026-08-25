@@ -69,9 +69,9 @@ export const AppShell: React.FC<AppShellProps> = ({
         <div className="page-container">
           {/* Regulatory & Risk Disclaimer */}
           <div className="footer-disclaimer">
-            <h3 className="text-small font-semibold mb-1">
+            <h2 className="text-small font-semibold mb-1">
               Tuyên bố miễn trừ trách nhiệm
-            </h3>
+            </h2>
             <p className="text-xs text-muted">
               {DISCLAIMER_FOOTER}
             </p>

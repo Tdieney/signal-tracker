@@ -111,6 +111,14 @@ VALID_MARKET_SESSION_STATUSES = {"CLOSED_CONFIRMED", "UNKNOWN"}
 VALID_QUALITY_STATUSES = {"PASS", "PARTIAL", "FAIL"}
 VALID_EXCHANGES = {"HOSE", "HNX", "UPCOM"}
 VALID_SIGNALS = {"ABOVE_MA10", "BELOW_MA10", "CROSS_UP_MA10", "CROSS_DOWN_MA10"}
+VALID_SIGNAL_REASONS = {
+    "ABOVE_MA10",
+    "BELOW_MA10",
+    "CROSS_UP_MA10",
+    "CROSS_DOWN_MA10",
+    "ON_MA10",
+    "INSUFFICIENT_DATA",
+}
 VALID_DATA_STATUSES = {"VALID", "INSUFFICIENT_DATA", "NO_DATA_FOR_AS_OF_DATE", "INVALID_DATA"}
 
 EXEMPT_SOURCE_FILES = {
@@ -523,8 +531,8 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
                     violations.append(f"screener.json items[{idx}].signal invalid: {sig}")
 
                 s_reason = item.get("signal_reason")
-                if s_reason is not None and (not isinstance(s_reason, str) or not s_reason.strip()):
-                    violations.append(f"screener.json items[{idx}].signal_reason must be non-empty string or null")
+                if s_reason is not None and s_reason not in VALID_SIGNAL_REASONS:
+                    violations.append(f"screener.json items[{idx}].signal_reason must be one of {VALID_SIGNAL_REASONS} or null, got: '{s_reason}'")
 
                 d_status = item.get("data_status")
                 if d_status not in VALID_DATA_STATUSES:
@@ -635,8 +643,8 @@ def validate_json_deep_structure(rel_path: str, content: str) -> Tuple[List[str]
                 if exp_v is not None and not is_positive_finite_number(exp_v):
                     violations.append(f"symbol detail explanation.{exp_f} must be positive finite number or null in {rel_path}")
             rule_v = explanation.get("rule")
-            if not isinstance(rule_v, str) or not rule_v.strip():
-                violations.append(f"symbol detail explanation.rule must be non-empty string in {rel_path}")
+            if rule_v is not None and rule_v not in VALID_SIGNAL_REASONS:
+                violations.append(f"symbol detail explanation.rule must be one of {VALID_SIGNAL_REASONS} or null in {rel_path}, got: '{rule_v}'")
 
     return violations, data
 

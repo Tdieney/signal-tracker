@@ -87,7 +87,7 @@ class IndicatorRecord:
     distance_pct: Optional[float] = None
     avg_volume_20d: Optional[float] = None
     signal: Optional[SignalType] = None
-    signal_reason: Optional[str] = None
+    signal_reason: Optional[SignalReason] = None
     data_status: DataStatus = DataStatus.VALID
     previous_close: Optional[float] = None
     previous_ma10: Optional[float] = None
@@ -117,7 +117,7 @@ class ManifestData:
     as_of_date: str
     generated_at: str
     market_timezone: str
-    market_session_status: str
+    market_session_status: MarketSessionStatus
     freshness: FreshnessInfo
     provider: str
     universe: str
@@ -166,7 +166,7 @@ class ScreenerItem:
     volume: Optional[int]
     avg_volume_20d: Optional[float]
     signal: Optional[SignalType]
-    signal_reason: Optional[str]
+    signal_reason: Optional[SignalReason]
     data_status: DataStatus
 
 
@@ -196,7 +196,7 @@ class SymbolExplanation:
     current_ma10: Optional[float]
     previous_close: Optional[float]
     previous_ma10: Optional[float]
-    rule: Optional[str]
+    rule: Optional[SignalReason]
 
 
 @dataclass

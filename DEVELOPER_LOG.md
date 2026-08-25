@@ -469,5 +469,95 @@ Do not record secrets, credentials, private endpoints, confidential/raw provider
   - Fail-closed runtime validation active for all JSON datasets.
 - Remaining work: None. Phase 1 is fully completed, hardened, tested across 6 browser viewports, successfully deployed to GitHub Pages, and verified live.
 
+---
 
+## 2026-08-25T14:02:00+07:00 — agy-20260825-phase1-7-contract-test-hardening — STARTED
 
+- Agent: Antigravity / Gemini 3.7 Flash
+- Request: Phase 1.7 — Contract và Test Hardening (Unified SignalReason enum, strict Zod schemas with math/calendar validation, narrowed E2E fail-closed allow-lists, negative control test, and standard AI Autonomous Workflow documentation).
+- Scope:
+  - Unify `SignalReason` enum across Python models, pipeline outputs, security check, frontend Zod schemas, tests, and documentation.
+  - Harden runtime Zod schemas: enforce `.strict()` on all objects, exact 16-hex `dataset_id`, exact `schema_version`, valid Gregorian calendar dates (`as_of_date`), valid ISO 8601 timestamps (`generated_at`), finite/positive/non-negative numbers, percentage bounds, and mathematical consistency invariants (`input_rows = accepted_rows + rejected_rows`, `above_pct`/`below_pct` matching counts).
+  - Narrow E2E fail-closed console/network allow-lists in `frontend/e2e/app.spec.ts` to exact predicates and anchored matches; add negative control test proving unrelated errors cause fail-closed test failures.
+  - Create `docs/AI_AUTONOMOUS_WORKFLOW.md` as the authoritative autonomous loop guide and link from `docs/README.md` and `AGENTS.md`.
+  - Maintain truthful test counting and reporting without absolute unverifiable claims.
+- Assumptions:
+  - Working tree baseline at commit `bf4bbd1` with clean git status and all gates passing.
+  - `SignalReason` valid enum values: `ABOVE_MA10`, `BELOW_MA10`, `CROSS_UP_MA10`, `CROSS_DOWN_MA10`, `ON_MA10`, `INSUFFICIENT_DATA`.
+- Planned files:
+  - `docs/AI_AUTONOMOUS_WORKFLOW.md` [NEW]
+  - `docs/README.md` [MODIFY]
+  - `docs/04-data-contracts.md` [MODIFY]
+  - `AGENTS.md` [MODIFY]
+  - `pipeline/models.py` [MODIFY]
+  - `pipeline/signals.py` [MODIFY]
+  - `pipeline/serialization.py` [MODIFY]
+  - `scripts/security_check.py` [MODIFY]
+  - `frontend/src/schemas/manifestSchema.ts` [MODIFY]
+  - `frontend/src/schemas/overviewSchema.ts` [MODIFY]
+  - `frontend/src/schemas/screenerSchema.ts` [MODIFY]
+  - `frontend/src/schemas/symbolSchema.ts` [MODIFY]
+  - `frontend/src/schemas/validationUtils.ts` [NEW]
+  - `frontend/src/test/schemas.test.ts` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `tests/test_security_check.py` [MODIFY]
+  - `tests/test_signals.py` [MODIFY]
+- Pre-existing working-tree changes: Untracked local diagnostic files (`error.png`, `logs_88886054015.zip`, `logs_88886054015/`) preserved and excluded from git tracking.
+
+---
+
+## 2026-08-25T14:13:30+07:00 — agy-20260825-phase1-7-contract-test-hardening — COMPLETED
+
+- Agent: Antigravity / Gemini 3.7 Flash
+- Outcome: Completed Phase 1.7 — Contract và Test Hardening with 100% release gates passing locally.
+- Changes & Key Decisions:
+  1. Standard AI Autonomous Workflow:
+     - Created `docs/AI_AUTONOMOUS_WORKFLOW.md` establishing the authoritative single source of truth for the autonomous execution loop, Definition of Done, non-stop execution policy, and truthful reporting standards.
+     - Updated `docs/README.md` and root `AGENTS.md` to reference `docs/AI_AUTONOMOUS_WORKFLOW.md`.
+  2. Unified `SignalReason` Enum Contract:
+     - Standardized `SignalReason` enum (`ABOVE_MA10`, `BELOW_MA10`, `CROSS_UP_MA10`, `CROSS_DOWN_MA10`, `ON_MA10`, `INSUFFICIENT_DATA`) across `pipeline/models.py`, `scripts/security_check.py`, `frontend/src/schemas/screenerSchema.ts`, `frontend/src/schemas/symbolSchema.ts`, and `docs/04-data-contracts.md`. Arbitrary strings are strictly rejected.
+     - Updated `symbol.explanation.rule` and `screener.items[i].signal_reason` in both scanner and Zod schemas to enforce this enum.
+  3. Hardened Runtime Zod Schemas:
+     - Added `frontend/src/schemas/validationUtils.ts` containing strict validation for 16-hex `dataset_id`, Gregorian calendar dates (`as_of_date` handling leap years and month boundaries), ISO 8601 UTC timestamps (`generated_at`), finite positive prices, non-negative volumes, and percentage bounds (`0 <= pct <= 100`).
+     - Enforced `.strict()` on all Zod object schemas (`ManifestSchema`, `OverviewSchema`, `ScreenerSchema`, `SymbolDetailSchema`) to immediately reject undeclared/unexpected keys.
+     - Implemented mathematical invariants in Zod schemas:
+       - Manifest quality accounting: `input_rows === accepted_rows + rejected_rows` and `eligible_symbols <= accepted_rows`.
+       - Overview metrics: `eligible_count === above_count + below_count + on_ma10_count`, and `above_pct`/`below_pct` mathematically consistent with `round(above_count / eligible_count * 100, 1)`.
+       - Symbol series OHLC bounds: `high >= low`, `high >= open`, `high >= close`, `low <= open`, `low <= close`.
+  4. Narrowed E2E Fail-Closed Allow-Lists & Negative Control:
+     - Replaced broad substring matching in `frontend/e2e/app.spec.ts` with strict event predicates (`isAllowedConsole`, `isAllowedRequestFailed`, `isAllowedPageError`) and exact resource matchers.
+     - Added a dedicated negative-control test in `frontend/e2e/app.spec.ts` verifying that injected unauthorized inline scripts (CSP violation) and uncaught errors trigger fail-closed test failures.
+     - Fixed WCAG heading hierarchy in `AppShell.tsx` and `SignalExplanationCard.tsx` (`h1` -> `h2`), resolving Axe `heading-order` violation.
+  5. Accurate Reporting:
+     - Differentiated the 13 tests in `tests/test_security_check.py` from the total 36-test Python suite.
+     - Expanded `frontend/src/test/schemas.test.ts` to 14 comprehensive unit tests verifying valid shapes, 16-hex formatting, calendar dates, percentage math, strict object key rejection, and `SignalReason` enums.
+- Files Changed:
+  - `docs/AI_AUTONOMOUS_WORKFLOW.md` [NEW]
+  - `frontend/src/schemas/validationUtils.ts` [NEW]
+  - `docs/README.md` [MODIFY]
+  - `docs/04-data-contracts.md` [MODIFY]
+  - `AGENTS.md` [MODIFY]
+  - `pipeline/models.py` [MODIFY]
+  - `scripts/security_check.py` [MODIFY]
+  - `frontend/src/schemas/manifestSchema.ts` [MODIFY]
+  - `frontend/src/schemas/overviewSchema.ts` [MODIFY]
+  - `frontend/src/schemas/screenerSchema.ts` [MODIFY]
+  - `frontend/src/schemas/symbolSchema.ts` [MODIFY]
+  - `frontend/src/test/schemas.test.ts` [MODIFY]
+  - `frontend/src/app/AppShell.tsx` [MODIFY]
+  - `frontend/src/features/symbol-detail/SignalExplanationCard.tsx` [MODIFY]
+  - `frontend/e2e/app.spec.ts` [MODIFY]
+  - `tests/test_security_check.py` [MODIFY]
+- Verification Commands & Observable Results:
+  - `python -m unittest discover tests -v`: Ran 36 tests (including 13 tests in `test_security_check.py`) -> 36 OK (1 skipped).
+  - `npm --prefix frontend test -- --run`: 5 test files, 29 tests passed (14 in `schemas.test.ts`).
+  - `npm --prefix frontend run typecheck`: 0 errors.
+  - `npm --prefix frontend run build:pages`: Static build complete.
+  - `python scripts/security_check.py --artifact frontend/dist`: 0 security or allow-list violations.
+  - `npx playwright test`: 104 passed, 4 skipped across all 6 viewport profiles.
+  - `python scripts/build_all.py`: Clean pass across all pipeline, build, test, security, and E2E stages.
+- Safety & Security Impact:
+  - Zero secrets exposed; exact allow-lists preserved.
+  - Strict CSP active and validated by both static scanner and runtime browser event listeners.
+  - All public JSON models and schemas adhere to strict, fail-closed contracts.
+- Remaining work: Push commit to remote, monitor CI and deploy workflows, verify live deployment, and proceed to Phase 2 provider-neutral market data architecture.

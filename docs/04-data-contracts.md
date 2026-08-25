@@ -80,11 +80,22 @@ BELOW_MA10:
 
 Nếu `close[t] == ma10[t]`, signal là `null` với reason `ON_MA10`; không ép thành ABOVE/BELOW. Nếu chưa đủ dữ liệu để xác định, `data_status = INSUFFICIENT_DATA` và `signal = null`.
 
+`signal_reason` (và `explanation.rule`) MUST là một trong các giá trị enum cố định sau (hoặc `null`):
+
+| SignalReason | Ý nghĩa kỹ thuật | Signal đi kèm |
+| --- | --- | --- |
+| `CROSS_UP_MA10` | $Close_t > MA10_t$ và $Close_{t-1} \le MA10_{t-1}$ (vừa cắt lên) | `CROSS_UP_MA10` |
+| `CROSS_DOWN_MA10` | $Close_t < MA10_t$ và $Close_{t-1} \ge MA10_{t-1}$ (vừa cắt xuống) | `CROSS_DOWN_MA10` |
+| `ABOVE_MA10` | $Close_t > MA10_t$ và $Close_{t-1} > MA10_{t-1}$ (duy trì trên MA10) | `ABOVE_MA10` |
+| `BELOW_MA10` | $Close_t < MA10_t$ và $Close_{t-1} < MA10_{t-1}$ (duy trì dưới MA10) | `BELOW_MA10` |
+| `ON_MA10` | $Close_t == MA10_t$ (đóng cửa đúng bằng MA10) | `null` |
+| `INSUFFICIENT_DATA` | Chưa đủ 10 phiên tính MA10 hoặc thiếu phiên $t-1$ | `null` |
+
 Hệ quả cần test rõ:
 
-- phiên hợp lệ 1–9: chưa có MA10, `data_status = INSUFFICIENT_DATA`;
-- phiên hợp lệ thứ 10: có thể hiển thị MA10 nhưng chưa có MA10 của phiên trước để phân loại cross một cách đáng tin cậy; `signal = null`, `data_status = INSUFFICIENT_DATA`;
-- từ phiên hợp lệ thứ 11: có thể phân loại đủ bốn signal baseline nếu dữ liệu hợp lệ;
+- phiên hợp lệ 1–9: chưa có MA10, `data_status = INSUFFICIENT_DATA`, `signal_reason = INSUFFICIENT_DATA`;
+- phiên hợp lệ thứ 10: có MA10 nhưng chưa có MA10 phiên trước để phân loại cross một cách đáng tin cậy; `signal = null`, `data_status = INSUFFICIENT_DATA`, `signal_reason = INSUFFICIENT_DATA`;
+- từ phiên hợp lệ thứ 11: phân loại đủ bốn signal baseline hoặc `ON_MA10`;
 - thiếu `avg_volume_20d` không làm signal MA10 mất hiệu lực, nhưng field đó vẫn là `null`.
 
 `data_status` public dùng một trong các giá trị:

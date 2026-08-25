@@ -46,9 +46,9 @@ export const SignalExplanationCard: React.FC<SignalExplanationCardProps> = ({
     <div className="card explanation-card">
       <div className="explanation-header">
         <Info size={18} className="text-muted" aria-hidden="true" />
-        <h3 className="text-h3">
+        <h2 className="text-h3">
           Giải thích tín hiệu kỹ thuật
-        </h3>
+        </h2>
       </div>
       <p className="text-body font-semibold">
         {sentence}
